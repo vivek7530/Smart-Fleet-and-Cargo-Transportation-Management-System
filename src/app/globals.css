@@ -1,0 +1,180 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* System stack — no webfont request, so the first paint is never blocked. */
+    --font-sans: 'Inter', 'Inter var', -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Text',
+      'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+
+    --background: 220 26% 97%;
+    --surface: 0 0% 100%;
+    --foreground: 224 20% 12%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 224 20% 12%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 224 20% 12%;
+
+    --primary: 243 70% 57%;
+    --primary-foreground: 0 0% 100%;
+    --primary-soft: 243 88% 96%;
+
+    --secondary: 220 16% 95%;
+    --secondary-foreground: 224 18% 22%;
+
+    --muted: 220 16% 96%;
+    --muted-foreground: 222 10% 46%;
+
+    --accent: 220 16% 95%;
+    --accent-foreground: 224 18% 20%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --destructive-soft: 0 86% 97%;
+
+    --success: 158 68% 34%;
+    --success-foreground: 0 0% 100%;
+    --success-soft: 152 76% 95%;
+
+    --warning: 32 92% 45%;
+    --warning-foreground: 0 0% 100%;
+    --warning-soft: 40 96% 94%;
+
+    --info: 208 82% 47%;
+    --info-foreground: 0 0% 100%;
+    --info-soft: 205 92% 95%;
+
+    --border: 220 15% 90%;
+    --input: 220 15% 88%;
+    --ring: 243 70% 57%;
+
+    --radius: 0.65rem;
+  }
+
+  .dark {
+    --background: 226 26% 7%;
+    --surface: 225 21% 10%;
+    --foreground: 220 18% 94%;
+
+    --card: 225 21% 10%;
+    --card-foreground: 220 18% 94%;
+
+    --popover: 225 22% 11%;
+    --popover-foreground: 220 18% 94%;
+
+    --primary: 245 76% 68%;
+    --primary-foreground: 226 30% 9%;
+    --primary-soft: 245 40% 18%;
+
+    --secondary: 224 17% 16%;
+    --secondary-foreground: 220 18% 92%;
+
+    --muted: 224 17% 15%;
+    --muted-foreground: 220 10% 62%;
+
+    --accent: 224 17% 17%;
+    --accent-foreground: 220 18% 92%;
+
+    --destructive: 0 72% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --destructive-soft: 0 42% 20%;
+
+    --success: 158 60% 46%;
+    --success-foreground: 226 30% 9%;
+    --success-soft: 158 40% 17%;
+
+    --warning: 36 90% 58%;
+    --warning-foreground: 226 30% 9%;
+    --warning-soft: 36 44% 18%;
+
+    --info: 208 84% 62%;
+    --info-foreground: 226 30% 9%;
+    --info-soft: 208 44% 18%;
+
+    --border: 223 16% 20%;
+    --input: 223 16% 22%;
+    --ring: 245 76% 68%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Numeric columns line up when digits share a width. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  ::selection {
+    @apply bg-primary/20;
+  }
+
+  /* A slim scrollbar keeps dense lists from feeling heavy. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--border));
+    border-radius: 9999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--muted-foreground) / 0.45);
+    background-clip: content-box;
+  }
+}
+
+@layer components {
+  /* Shared shell for every card-like surface. */
+  .surface-card {
+    @apply rounded-xl border border-border/70 bg-card shadow-xs;
+  }
+
+  .focus-ring {
+    @apply outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2;
+  }
+
+  /* Sweeping highlight used by the skeleton loaders. */
+  .skeleton-shimmer {
+    @apply relative overflow-hidden bg-muted;
+  }
+  .skeleton-shimmer::after {
+    @apply absolute inset-0 -translate-x-full animate-shimmer bg-gradient-to-r from-transparent via-black/[0.045] to-transparent;
+    content: '';
+  }
+  .dark .skeleton-shimmer::after {
+    @apply via-white/[0.06];
+  }
+
+  .scroll-fade-bottom {
+    mask-image: linear-gradient(to bottom, black calc(100% - 24px), transparent 100%);
+  }
+}
+
+@layer utilities {
+  .grid-auto-fit {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+  }
+}
