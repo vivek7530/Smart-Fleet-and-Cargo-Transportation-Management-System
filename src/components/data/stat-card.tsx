@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { ArrowDownRight, ArrowRight, ArrowUpRight, Minus } from 'lucide-react';
+import { ArrowDownRight, ArrowRight, ArrowUpRight, Minus } from '@/components/icons';
 import { cn } from '@/lib/utils';
 import { formatPercent } from '@/lib/format';
 import type { SeriesPoint } from '@/lib/types';

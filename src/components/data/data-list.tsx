@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ArrowDown, ArrowUp, ChevronsUpDown, Loader2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, ChevronsUpDown, Loader2 } from '@/components/icons';
 import { cn } from '@/lib/utils';
 import { SkeletonRows } from '@/components/ui/skeleton';
 import { EmptyState, ErrorState } from '@/components/ui/empty-state';

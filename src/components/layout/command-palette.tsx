@@ -4,7 +4,7 @@ import * as React from 'react';
 import { useRouter } from 'next/navigation';
 import { Command } from 'cmdk';
 import { useQuery } from '@tanstack/react-query';
-import { Loader2, Package, Route, Search, Truck, UserRound } from 'lucide-react';
+import { Loader2, Package, Route, Search, Truck, UserRound } from '@/components/icons';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { flatNavigationFor } from '@/lib/navigation';

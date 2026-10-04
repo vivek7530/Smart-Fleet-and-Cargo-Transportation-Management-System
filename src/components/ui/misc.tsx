@@ -9,7 +9,7 @@ import * as PopoverPrimitive from '@radix-ui/react-popover';
 import * as CheckboxPrimitive from '@radix-ui/react-checkbox';
 import * as SwitchPrimitive from '@radix-ui/react-switch';
 import * as ScrollAreaPrimitive from '@radix-ui/react-scroll-area';
-import { Check } from 'lucide-react';
+import { Check } from '@/components/icons';
 import { avatarClasses, cn, initials } from '@/lib/utils';
 
 /* ------------------------------------------------------------------ Separator */
@@ -203,7 +203,7 @@ const Checkbox = React.forwardRef<
     {...props}
   >
     <CheckboxPrimitive.Indicator className="flex items-center justify-center text-current">
-      <Check className="size-3" strokeWidth={3} />
+      <Check className="size-3" weight="bold" />
     </CheckboxPrimitive.Indicator>
   </CheckboxPrimitive.Root>
 ));

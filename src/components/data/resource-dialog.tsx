@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle } from '@/components/icons';
 import { toast } from 'sonner';
 import { ApiError } from '@/lib/api';
 import { Button } from '@/components/ui/button';

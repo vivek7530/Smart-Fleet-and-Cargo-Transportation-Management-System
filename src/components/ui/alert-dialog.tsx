@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import * as AlertDialogPrimitive from '@radix-ui/react-alert-dialog';
-import { AlertTriangle, Loader2 } from 'lucide-react';
+import { AlertTriangle, Loader2 } from '@/components/icons';
 import { cn } from '@/lib/utils';
 import { buttonVariants } from './button';
 

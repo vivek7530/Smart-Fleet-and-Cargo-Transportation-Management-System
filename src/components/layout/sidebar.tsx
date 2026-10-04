@@ -3,7 +3,7 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Truck } from 'lucide-react';
+import { Truck } from '@/components/icons';
 import { cn } from '@/lib/utils';
 import { navigationFor } from '@/lib/navigation';
 import type { Role } from '@/lib/types';
@@ -22,7 +22,7 @@ export function SidebarBrand({ collapsed }: { collapsed?: boolean }) {
       className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 transition-colors hover:bg-accent/60 focus-ring"
     >
       <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-xs">
-        <Truck className="size-4.5" strokeWidth={2.25} />
+        <Truck className="size-[18px]" weight="bold" />
       </span>
       {!collapsed ? (
         <span className="min-w-0">
@@ -76,7 +76,7 @@ export function SidebarNav({
               >
                 <item.icon
                   className={cn('size-4 shrink-0', active ? 'text-primary' : 'text-muted-foreground/80')}
-                  strokeWidth={active ? 2.25 : 2}
+                  weight={active ? 'duotone' : 'regular'}
                 />
                 <span className="min-w-0 flex-1 truncate">{item.label}</span>
                 {count ? (

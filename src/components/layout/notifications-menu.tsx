@@ -12,7 +12,7 @@ import {
   IndianRupee,
   Route,
   UserPlus,
-} from 'lucide-react';
+} from '@/components/icons';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { formatRelative } from '@/lib/format';

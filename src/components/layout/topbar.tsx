@@ -3,7 +3,7 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LogOut, Menu, Monitor, Moon, Search, Settings, Sun, User } from 'lucide-react';
+import { LogOut, Menu, Monitor, Moon, Search, Settings, Sun, User } from '@/components/icons';
 import { cn } from '@/lib/utils';
 import { flatNavigationFor } from '@/lib/navigation';
 import { useAuth } from '@/components/auth-provider';

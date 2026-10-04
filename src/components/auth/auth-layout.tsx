@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { CheckCircle2, Truck } from 'lucide-react';
+import { CheckCircle2, Truck } from '@/components/icons';
 
 const HIGHLIGHTS = [
   'Dispatch trips, assign trucks and track every consignment end to end.',
@@ -47,7 +47,7 @@ export function AuthLayout({
 
         <div className="relative flex items-center gap-2.5">
           <span className="flex size-9 items-center justify-center rounded-xl bg-white/10 backdrop-blur">
-            <Truck className="size-5" strokeWidth={2.25} />
+            <Truck className="size-5" weight="bold" />
           </span>
           <span className="text-[15px] font-semibold tracking-tight">CargoEntry</span>
         </div>
@@ -76,7 +76,7 @@ export function AuthLayout({
         <div className="w-full max-w-[26rem]">
           <div className="mb-8 flex items-center gap-2.5 lg:hidden">
             <span className="flex size-9 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-              <Truck className="size-5" strokeWidth={2.25} />
+              <Truck className="size-5" weight="bold" />
             </span>
             <span className="text-[15px] font-semibold tracking-tight">CargoEntry</span>
           </div>

@@ -1,4 +1,4 @@
-import type { LucideIcon } from 'lucide-react';
+import type { Icon } from '@/components/icons';
 import {
   BadgeIndianRupee,
   CircleDollarSign,
@@ -17,13 +17,13 @@ import {
   UserRound,
   Users,
   Wrench,
-} from 'lucide-react';
+} from '@/components/icons';
 import type { Role } from './types';
 
 export interface NavItem {
   label: string;
   href: string;
-  icon: LucideIcon;
+  icon: Icon;
   /** Roles allowed to see the entry — the API enforces the real boundary. */
   roles: Role[];
   /** Key of a badge count supplied by the layout (e.g. pending expenses). */
