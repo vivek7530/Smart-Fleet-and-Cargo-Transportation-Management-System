@@ -17,7 +17,7 @@ import {
   Pencil,
   Route,
   Truck as TruckIcon,
-} from 'lucide-react';
+} from '@/components/icons';
 import { api } from '@/lib/api';
 import { formatCurrency, formatDate, formatDateTime, formatDistance, formatWeight } from '@/lib/format';
 import { humanise } from '@/lib/utils';

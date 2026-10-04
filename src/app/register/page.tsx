@@ -7,7 +7,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { AlertCircle, ArrowRight, Lock, MailCheck, ShieldCheck, SmartphoneNfc } from 'lucide-react';
+import { AlertCircle, ArrowRight, Lock, MailCheck, ShieldCheck, SmartphoneNfc } from '@/components/icons';
 import { toast } from 'sonner';
 import { ApiError, api } from '@/lib/api';
 import { formatDate } from '@/lib/format';

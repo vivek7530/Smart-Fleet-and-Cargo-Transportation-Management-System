@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Check, FileText, FileWarning, Pencil, Plus, Trash2, X } from 'lucide-react';
+import { Check, FileText, FileWarning, Pencil, Plus, Trash2, X } from '@/components/icons';
 import { toast } from 'sonner';
 import { api, errorMessage } from '@/lib/api';
 import { formatDate, toDateInput } from '@/lib/format';

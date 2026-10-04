@@ -4,7 +4,7 @@ import * as React from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, IdCard, Mail, Phone, Route, Truck as TruckIcon } from 'lucide-react';
+import { ArrowLeft, IdCard, Mail, Phone, Route, Truck as TruckIcon } from '@/components/icons';
 import { api } from '@/lib/api';
 import { formatCurrency, formatDate, formatNumber } from '@/lib/format';
 import { humanise } from '@/lib/utils';

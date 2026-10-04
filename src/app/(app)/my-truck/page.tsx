@@ -12,7 +12,7 @@ import {
   Route,
   Truck as TruckIcon,
   Wrench,
-} from 'lucide-react';
+} from '@/components/icons';
 import { api } from '@/lib/api';
 import { formatDate, formatCurrency, formatNumber, formatWeight } from '@/lib/format';
 import { humanise } from '@/lib/utils';
@@ -111,7 +111,7 @@ export default function MyTruckPage() {
         >
           <div className="flex flex-wrap items-center gap-4">
             <span className="flex size-14 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
-              <TruckIcon className="size-7" strokeWidth={2} />
+              <TruckIcon className="size-7" weight="duotone" />
             </span>
             <div className="min-w-0 flex-1">
               <p className="text-2xl font-semibold tracking-tight tabular">{truck.truckNumber}</p>

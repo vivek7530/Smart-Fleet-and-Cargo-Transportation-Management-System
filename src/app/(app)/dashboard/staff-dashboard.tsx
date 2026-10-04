@@ -15,7 +15,7 @@ import {
   Truck,
   UserRound,
   Wallet,
-} from 'lucide-react';
+} from '@/components/icons';
 import { formatCurrency, formatDate, formatNumber } from '@/lib/format';
 import { humanise } from '@/lib/utils';
 import type { StaffDashboard } from '@/lib/types';

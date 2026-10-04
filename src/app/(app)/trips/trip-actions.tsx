@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, CircleDot, PackageCheck, PlayCircle } from 'lucide-react';
+import { CheckCircle2, CircleDot, PackageCheck, PlayCircle } from '@/components/icons';
 import { toast } from 'sonner';
 import { api, errorMessage } from '@/lib/api';
 import { humanise } from '@/lib/utils';

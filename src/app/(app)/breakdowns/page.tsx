@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { AlertTriangle, CheckCircle2, LifeBuoy, MapPin, Plus, Wrench } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, LifeBuoy, MapPin, Plus, Wrench } from '@/components/icons';
 import { toast } from 'sonner';
 import { api, errorMessage } from '@/lib/api';
 import { formatDateTime, formatRelative } from '@/lib/format';

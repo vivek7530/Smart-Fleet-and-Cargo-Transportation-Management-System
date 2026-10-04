@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { AlertCircle, Eye, EyeOff, LogIn } from 'lucide-react';
+import { AlertCircle, Eye, EyeOff, LogIn } from '@/components/icons';
 import { toast } from 'sonner';
 import { ApiError } from '@/lib/api';
 import { useAuth } from '@/components/auth-provider';

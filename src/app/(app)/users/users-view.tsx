@@ -13,7 +13,7 @@ import {
   UserCheck,
   UserPlus,
   Users as UsersIcon,
-} from 'lucide-react';
+} from '@/components/icons';
 import { toast } from 'sonner';
 import { api, errorMessage } from '@/lib/api';
 import { formatDate, formatRelative } from '@/lib/format';

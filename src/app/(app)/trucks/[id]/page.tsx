@@ -14,7 +14,7 @@ import {
   Route,
   Truck as TruckIcon,
   Wrench,
-} from 'lucide-react';
+} from '@/components/icons';
 import { api } from '@/lib/api';
 import { formatCurrency, formatDate, formatNumber, formatWeight } from '@/lib/format';
 import { humanise } from '@/lib/utils';

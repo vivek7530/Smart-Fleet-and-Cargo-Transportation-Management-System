@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
-import { Eye, IdCard, Phone, Truck as TruckIcon, UserPlus, UserRound } from 'lucide-react';
+import { Eye, IdCard, Phone, Truck as TruckIcon, UserPlus, UserRound } from '@/components/icons';
 import { formatDate, formatNumber } from '@/lib/format';
 import type { Truck, UserRecord } from '@/lib/types';
 import { useAuth } from '@/components/auth-provider';

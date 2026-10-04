@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Ban, Eye, MapPin, Pencil, Plus, Route, Trash2 } from 'lucide-react';
+import { Ban, Eye, MapPin, Pencil, Plus, Route, Trash2 } from '@/components/icons';
 import { toast } from 'sonner';
 import { api, errorMessage } from '@/lib/api';
 import { formatCurrency, formatDate } from '@/lib/format';

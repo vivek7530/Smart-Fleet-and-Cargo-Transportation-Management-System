@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Route, TrendingDown, TrendingUp, Truck, UserRound, Wallet } from 'lucide-react';
+import { Route, TrendingDown, TrendingUp, Truck, UserRound, Wallet } from '@/components/icons';
 import { api } from '@/lib/api';
 import { formatCurrency, formatDate, formatNumber } from '@/lib/format';
 import { humanise } from '@/lib/utils';

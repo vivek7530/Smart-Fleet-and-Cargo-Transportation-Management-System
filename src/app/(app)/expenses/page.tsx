@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { BadgeIndianRupee, Check, Clock3, Pencil, Plus, Trash2, X } from 'lucide-react';
+import { BadgeIndianRupee, Check, Clock3, Pencil, Plus, Trash2, X } from '@/components/icons';
 import { toast } from 'sonner';
 import { api, errorMessage } from '@/lib/api';
 import { formatCurrency, formatDate, toDateInput } from '@/lib/format';

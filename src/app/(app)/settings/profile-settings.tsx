@@ -5,7 +5,7 @@ import { useMutation } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { KeyRound, Lock, Save, ShieldCheck } from 'lucide-react';
+import { KeyRound, Lock, Save, ShieldCheck } from '@/components/icons';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { formatDate, toDateInput } from '@/lib/format';

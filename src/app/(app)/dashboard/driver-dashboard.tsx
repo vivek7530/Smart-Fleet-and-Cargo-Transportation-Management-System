@@ -13,7 +13,7 @@ import {
   Package,
   Route,
   Truck,
-} from 'lucide-react';
+} from '@/components/icons';
 import { formatCurrency, formatDate, formatNumber, formatWeight } from '@/lib/format';
 import type { DriverDashboard } from '@/lib/types';
 import { StatCard, MiniStat } from '@/components/data/stat-card';
