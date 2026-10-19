@@ -158,7 +158,7 @@ export function ExpenseBreakdownChart({ data, height = 300 }: { data: SeriesPoin
           name="Trip costs"
           stackId="expenses"
           fill={palette.transportation}
-          radius={[4, 4, 0, 0]}
+          radius={[6, 6, 0, 0]}
         />
       </BarChart>
     </ResponsiveContainer>
@@ -180,7 +180,7 @@ export function TripsChart({ data, height = 260 }: { data: SeriesPoint[]; height
           content={<ChartTooltip palette={palette} formatter={formatNumber} />}
           cursor={{ fill: palette.grid, fillOpacity: 0.35 }}
         />
-        <Bar dataKey="trips" name="Trips" fill={palette.trips} radius={[4, 4, 0, 0]} maxBarSize={44} />
+        <Bar dataKey="trips" name="Trips" fill={palette.trips} radius={[6, 6, 0, 0]} maxBarSize={44} />
       </BarChart>
     </ResponsiveContainer>
   );

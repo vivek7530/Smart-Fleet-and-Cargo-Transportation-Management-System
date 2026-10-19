@@ -1,9 +1,23 @@
 import bcrypt from 'bcryptjs';
 
-const SALT_ROUNDS = 12;
+/**
+ * bcryptjs is pure JavaScript, so every extra round doubles sign-in time on the
+ * event loop. 10 rounds (~4x faster than 12) is still within OWASP guidance for
+ * bcrypt; older cost-12 hashes are upgraded transparently on the next sign-in.
+ */
+const SALT_ROUNDS = 10;
 
 export async function hashPassword(plain: string): Promise<string> {
   return bcrypt.hash(plain, SALT_ROUNDS);
+}
+
+/** True when a stored hash was made with a different cost than the current one. */
+export function needsRehash(hash: string): boolean {
+  try {
+    return bcrypt.getRounds(hash) !== SALT_ROUNDS;
+  } catch {
+    return false;
+  }
 }
 
 export async function verifyPassword(plain: string, hash: string): Promise<boolean> {

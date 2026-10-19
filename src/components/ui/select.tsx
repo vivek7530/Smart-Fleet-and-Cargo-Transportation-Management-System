@@ -20,10 +20,10 @@ const SelectTrigger = React.forwardRef<
     ref={ref}
     aria-invalid={invalid || undefined}
     className={cn(
-      'flex w-full items-center justify-between gap-2 rounded-lg border border-input bg-surface px-3 text-sm shadow-xs transition-colors',
+      'flex w-full items-center justify-between gap-2 rounded-lg border border-input bg-surface px-3 text-sm shadow-card transition-[border-color,box-shadow] duration-200 hover:border-foreground/20',
       'placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/40 focus:border-ring',
       'disabled:cursor-not-allowed disabled:opacity-60 [&>span]:line-clamp-1 [&>span]:text-left',
-      size === 'sm' ? 'h-8 text-[13px]' : 'h-9',
+      size === 'sm' ? 'h-9 text-[13px]' : 'h-10',
       invalid && 'border-destructive focus:ring-destructive/30',
       className,
     )}
@@ -46,7 +46,7 @@ const SelectContent = React.forwardRef<
       ref={ref}
       position={position}
       className={cn(
-        'relative z-50 max-h-72 min-w-32 overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-pop',
+        'relative z-50 max-h-72 min-w-32 overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-pop',
         'data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
         position === 'popper' && 'data-[side=bottom]:translate-y-1 data-[side=top]:-translate-y-1',
         className,
@@ -88,7 +88,7 @@ const SelectItem = React.forwardRef<
   <SelectPrimitive.Item
     ref={ref}
     className={cn(
-      'relative flex w-full cursor-pointer select-none items-center rounded-md py-1.5 pl-2 pr-8 text-[13px] outline-none transition-colors',
+      'relative flex w-full cursor-pointer select-none items-center rounded-lg py-2 pl-2.5 pr-8 text-[13px] outline-none transition-colors',
       'focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
       className,
     )}

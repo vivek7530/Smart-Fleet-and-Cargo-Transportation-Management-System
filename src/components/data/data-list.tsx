@@ -4,7 +4,8 @@ import * as React from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ArrowDown, ArrowUp, ChevronsUpDown, Loader2 } from '@/components/icons';
 import { cn } from '@/lib/utils';
-import { SkeletonRows } from '@/components/ui/skeleton';
+import { motion } from 'motion/react';
+import { RefetchBar, SkeletonRows } from '@/components/ui/skeleton';
 import { EmptyState, ErrorState } from '@/components/ui/empty-state';
 import { errorMessage } from '@/lib/api';
 
@@ -13,6 +14,8 @@ const VIRTUALIZE_THRESHOLD = 60;
 const ESTIMATED_ROW_HEIGHT = 64;
 /** How many rows from the end the next page starts loading. */
 const PREFETCH_ROWS_FROM_END = 5;
+/** Rows per page; the cascade restarts for each newly loaded page. */
+const DEFAULT_PAGE = 10;
 
 export interface Column<T> {
   key: string;
@@ -34,6 +37,8 @@ export interface DataListProps<T> {
   getRowId: (item: T) => string;
 
   isLoading: boolean;
+  /** A filter or search change is loading while the previous rows stay visible. */
+  isRefetching?: boolean;
   isError?: boolean;
   error?: unknown;
   onRetry?: () => void;
@@ -69,6 +74,7 @@ export function DataList<T>({
   columns,
   getRowId,
   isLoading,
+  isRefetching = false,
   isError,
   error,
   onRetry,
@@ -133,7 +139,13 @@ export function DataList<T>({
   }
 
   return (
-    <div className={cn('surface-card overflow-hidden', className)}>
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.3 }}
+      className={cn('surface-card relative overflow-hidden', className)}
+    >
+      <RefetchBar active={isRefetching} className="absolute inset-x-0 top-0 z-10" />
       <HeaderRow
         columns={columns}
         templateColumns={templateColumns}
@@ -143,6 +155,7 @@ export function DataList<T>({
         onSortChange={onSortChange}
       />
 
+      <div className={cn('transition-opacity duration-300', isRefetching && 'opacity-60')}>
       {shouldVirtualize ? (
         <VirtualBody
           items={items}
@@ -168,6 +181,7 @@ export function DataList<T>({
           canLoadMore={Boolean(hasNextPage)}
         />
       )}
+      </div>
 
       <ListFooter
         isFetchingNextPage={Boolean(isFetchingNextPage)}
@@ -176,7 +190,7 @@ export function DataList<T>({
         total={total}
         onLoadMore={loadMore}
       />
-    </div>
+    </motion.div>
   );
 }
 
@@ -200,7 +214,7 @@ function HeaderRow<T>({
   return (
     <div
       role="row"
-      className="hidden items-center gap-4 border-b bg-muted/40 px-4 py-2.5 md:grid"
+      className="hidden items-center gap-4 border-b bg-muted/40 px-5 py-2.5 md:grid"
       style={{ gridTemplateColumns: templateColumns }}
     >
       {columns.map((column) => {
@@ -213,7 +227,7 @@ function HeaderRow<T>({
             role="columnheader"
             aria-sort={active ? (sortDir === 'asc' ? 'ascending' : 'descending') : undefined}
             className={cn(
-              'min-w-0 text-2xs font-semibold uppercase tracking-wide text-muted-foreground',
+              'min-w-0 text-xs font-medium text-muted-foreground',
               column.align === 'right' && 'text-right',
               column.align === 'center' && 'text-center',
               hideBelowClass(column.hideBelow),
@@ -227,7 +241,7 @@ function HeaderRow<T>({
                   onSortChange!(column.sortKey!, active && sortDir === 'desc' ? 'asc' : 'desc')
                 }
                 className={cn(
-                  'inline-flex items-center gap-1 rounded px-1 py-0.5 -mx-1 uppercase transition-colors hover:text-foreground focus-ring',
+                  'inline-flex items-center gap-1 rounded px-1 py-0.5 -mx-1 transition-colors hover:text-foreground focus-ring',
                   active && 'text-foreground',
                   column.align === 'right' && 'flex-row-reverse',
                 )}
@@ -298,11 +312,12 @@ function PlainBody<T>({
   }, [canLoadMore, triggerIndex, items.length]);
 
   return (
-    <div role="rowgroup" className="divide-y divide-border/70">
+    <div role="rowgroup" className="divide-y divide-border/60">
       {items.map((item, index) => (
         <React.Fragment key={getRowId(item)}>
           {index === triggerIndex ? <div ref={sentinelRef} aria-hidden className="h-0" /> : null}
           <Row
+            index={index % DEFAULT_PAGE}
             item={item}
             columns={columns}
             templateColumns={templateColumns}
@@ -374,6 +389,7 @@ function VirtualBody<T>({
 }
 
 function Row<T>({
+  index,
   item,
   columns,
   templateColumns,
@@ -381,6 +397,8 @@ function Row<T>({
   rowActions,
   mobileRow,
 }: {
+  /** Position within its page; drives the cascade delay. Omitted for virtual rows. */
+  index?: number;
   item: T;
   columns: Column<T>[];
   templateColumns: string;
@@ -389,6 +407,7 @@ function Row<T>({
   mobileRow?: (item: T) => React.ReactNode;
 }) {
   const interactive = Boolean(onRowClick);
+  const animated = index !== undefined;
 
   const handleKeyDown = (event: React.KeyboardEvent) => {
     if (!interactive) return;
@@ -399,19 +418,26 @@ function Row<T>({
   };
 
   return (
-    <div
+    <motion.div
+      initial={animated ? { opacity: 0, y: 10 } : false}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1], delay: animated ? Math.min(index, 12) * 0.035 : 0 }}
       role="row"
       tabIndex={interactive ? 0 : undefined}
       onClick={interactive ? () => onRowClick?.(item) : undefined}
       onKeyDown={handleKeyDown}
       className={cn(
-        'group relative transition-colors focus-ring',
-        interactive && 'cursor-pointer hover:bg-muted/45',
+        'group relative transition-colors duration-200 focus-ring',
+        interactive &&
+          'cursor-pointer hover:bg-muted/50 before:absolute before:inset-y-2 before:left-0 before:w-[3px] before:scale-y-0 before:rounded-r-full before:bg-primary before:transition-transform before:duration-200 hover:before:scale-y-100',
       )}
     >
       {/* Desktop: aligned grid columns. */}
       <div
-        className="hidden items-center gap-4 px-4 py-3 md:grid"
+        className={cn(
+          'hidden items-center gap-4 px-5 py-3.5 transition-transform duration-300 ease-out md:grid',
+          interactive && 'group-hover:translate-x-1',
+        )}
         style={{ gridTemplateColumns: templateColumns }}
       >
         {columns.map((column) => (
@@ -419,7 +445,7 @@ function Row<T>({
             key={column.key}
             role="cell"
             className={cn(
-              'min-w-0 text-[13px]',
+              'min-w-0 text-[13.5px]',
               column.align === 'right' && 'text-right',
               column.align === 'center' && 'text-center',
               hideBelowClass(column.hideBelow),
@@ -442,7 +468,7 @@ function Row<T>({
       </div>
 
       {/* Mobile: stacked card so nothing is squeezed off-screen. */}
-      <div className="px-4 py-3.5 md:hidden">
+      <div className="px-4 py-4 md:hidden">
         {mobileRow ? (
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">{mobileRow(item)}</div>
@@ -454,14 +480,14 @@ function Row<T>({
           <div className="space-y-2">
             {columns.slice(0, 4).map((column) => (
               <div key={column.key} className="flex items-baseline justify-between gap-3 text-[13px]">
-                <span className="text-2xs uppercase tracking-wide text-muted-foreground">{column.header}</span>
+                <span className="text-xs text-muted-foreground">{column.header}</span>
                 <span className="min-w-0 text-right">{column.render(item)}</span>
               </div>
             ))}
           </div>
         )}
       </div>
-    </div>
+    </motion.div>
   );
 }
 

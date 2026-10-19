@@ -142,6 +142,7 @@ function RegisterForm({ token }: { token: string }) {
 
   return (
     <AuthLayout
+      scene="register"
       title="Complete your registration"
       subtitle={
         <>
@@ -308,6 +309,7 @@ function LockedTag() {
 function MissingToken() {
   return (
     <AuthLayout
+      scene="register"
       title="Registration link required"
       subtitle="Registration is by invitation only. Open the link your administrator sent you by email or SMS."
       footer={
@@ -333,7 +335,7 @@ function InvalidInvitation({ error }: { error: unknown }) {
     error instanceof ApiError ? error.message : 'This invitation link is not valid or has expired.';
 
   return (
-    <AuthLayout title="Invitation unavailable" subtitle={message}>
+    <AuthLayout scene="register" title="Invitation unavailable" subtitle={message}>
       <div className="space-y-4">
         <div className="flex items-start gap-2.5 rounded-lg border border-destructive/25 bg-destructive-soft px-3.5 py-3 text-[13px] text-destructive">
           <AlertCircle className="mt-px size-4 shrink-0" />
@@ -352,7 +354,7 @@ function InvalidInvitation({ error }: { error: unknown }) {
 
 function RegisterSkeleton() {
   return (
-    <AuthLayout title="Complete your registration" subtitle="Checking your invitation…">
+    <AuthLayout scene="register" title="Complete your registration" subtitle="Checking your invitation…">
       <div className="space-y-4">
         <Skeleton className="h-14 w-full rounded-lg" />
         {Array.from({ length: 4 }).map((_, index) => (

@@ -190,6 +190,7 @@ export default function CargoPage() {
         columns={columns}
         getRowId={(cargo) => cargo.id}
         isLoading={query.isLoading}
+        isRefetching={query.isRefetching}
         isError={query.isError}
         error={query.error}
         onRetry={() => query.refetch()}

@@ -66,8 +66,8 @@ export async function authenticate(input: LoginInput): Promise<UserDocument> {
     throw ApiError.forbidden('Your account is not activated yet. Please complete your registration first.');
   }
 
+  // Persisted by the route after the response is sent — see /api/auth/login.
   user.lastLoginAt = new Date();
-  await user.save();
   return user;
 }
 

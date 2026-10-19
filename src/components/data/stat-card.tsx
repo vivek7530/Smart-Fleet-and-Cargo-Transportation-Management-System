@@ -2,21 +2,25 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { ArrowDownRight, ArrowRight, ArrowUpRight, Minus } from '@/components/icons';
+import { motion } from 'motion/react';
+import { ArrowDownRight, ArrowUpRight, ArrowRight, Minus } from '@/components/icons';
 import { cn } from '@/lib/utils';
 import { formatPercent } from '@/lib/format';
 import type { SeriesPoint } from '@/lib/types';
 import { Sparkline } from '@/components/charts/charts';
 import type { ChartPalette } from '@/components/charts/chart-theme';
+import { CountUp, riseItem } from '@/components/motion/primitives';
 
 const TONES = {
-  default: 'bg-primary-soft text-primary',
-  success: 'bg-success-soft text-success',
-  warning: 'bg-warning-soft text-warning',
-  danger: 'bg-destructive-soft text-destructive',
-  info: 'bg-info-soft text-info',
-  neutral: 'bg-muted text-muted-foreground',
+  default: { tile: 'bg-primary-soft text-primary', glow: 'bg-primary/20' },
+  success: { tile: 'bg-success-soft text-success', glow: 'bg-success/20' },
+  warning: { tile: 'bg-warning-soft text-warning', glow: 'bg-warning/20' },
+  danger: { tile: 'bg-destructive-soft text-destructive', glow: 'bg-destructive/20' },
+  info: { tile: 'bg-info-soft text-info', glow: 'bg-info/20' },
+  neutral: { tile: 'bg-muted text-foreground/70', glow: 'bg-foreground/10' },
 } as const;
+
+const MotionLink = motion.create(Link);
 
 export interface StatCardProps {
   label: string;
@@ -45,59 +49,64 @@ export function StatCard({
   sparkline,
   className,
 }: StatCardProps) {
+  const palette = TONES[tone];
+
   const content = (
     <>
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 space-y-1">
-          <p className="truncate text-xs font-medium text-muted-foreground">{label}</p>
-          <p className="truncate text-2xl font-semibold tracking-tight tabular">{value}</p>
-        </div>
+      <div className="relative flex items-start justify-between gap-3">
         {icon ? (
           <span
             className={cn(
-              'flex size-9 shrink-0 items-center justify-center rounded-lg [&_svg]:size-4.5',
-              TONES[tone],
+              'flex size-9 shrink-0 items-center justify-center rounded-lg transition-transform duration-300 group-hover:scale-105 [&_svg]:size-5',
+              palette.tile,
             )}
           >
             {icon}
           </span>
         ) : null}
+        {trend !== undefined && trend !== null ? <TrendChip value={trend} invert={invertTrend} /> : null}
       </div>
 
-      <div className="mt-2.5 flex items-end justify-between gap-3">
-        <div className="min-w-0 space-y-1">
-          {trend !== undefined && trend !== null ? <TrendChip value={trend} invert={invertTrend} /> : null}
-          {hint ? <p className="truncate text-2xs text-muted-foreground">{hint}</p> : null}
-        </div>
+      <div className="relative mt-4 min-w-0">
+        <p className="truncate text-[13px] font-medium text-muted-foreground">{label}</p>
+        <p className="mt-1 truncate text-2xl font-semibold tracking-tight">
+          <CountUp value={value} />
+        </p>
+      </div>
+
+      <div className="relative mt-3 flex min-h-8 items-end justify-between gap-3">
+        {hint ? <p className="min-w-0 truncate text-xs text-muted-foreground">{hint}</p> : <span />}
 
         {sparkline ? (
-          <div className="h-10 w-24 shrink-0">
+          <div className="h-9 w-24 shrink-0">
             <Sparkline data={sparkline.data} dataKey={sparkline.dataKey} tone={sparkline.tone} />
           </div>
+        ) : href ? (
+          <ArrowRight className="size-[18px] shrink-0 -translate-x-1 text-muted-foreground opacity-0 transition-all duration-300 group-hover:translate-x-0 group-hover:text-primary group-hover:opacity-100" />
         ) : null}
       </div>
-
-      {href ? (
-        <ArrowRight className="absolute right-4 top-1/2 size-4 -translate-y-1/2 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
-      ) : null}
     </>
   );
 
   const classes = cn(
-    'surface-card group relative p-5 transition-shadow',
-    href && 'hover:shadow-md focus-ring',
+    'surface-card group relative block overflow-hidden p-5 transition-[box-shadow,transform,border-color] duration-300',
+    href && 'hover:-translate-y-0.5 hover:border-foreground/[0.14] hover:shadow-md focus-ring',
     className,
   );
 
   if (href) {
     return (
-      <Link href={href} className={classes}>
+      <MotionLink href={href} className={classes} variants={riseItem}>
         {content}
-      </Link>
+      </MotionLink>
     );
   }
 
-  return <div className={classes}>{content}</div>;
+  return (
+    <motion.div className={classes} variants={riseItem}>
+      {content}
+    </motion.div>
+  );
 }
 
 function TrendChip({ value, invert }: { value: number; invert?: boolean }) {
@@ -108,7 +117,7 @@ function TrendChip({ value, invert }: { value: number; invert?: boolean }) {
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-2xs font-medium tabular',
+        'inline-flex items-center gap-0.5 rounded-full px-2 py-1 text-[11.5px] font-semibold leading-none tabular',
         flat
           ? 'bg-muted text-muted-foreground'
           : positive
@@ -118,11 +127,11 @@ function TrendChip({ value, invert }: { value: number; invert?: boolean }) {
       title="Compared with the previous period"
     >
       {flat ? (
-        <Minus className="size-3" />
+        <Minus className="size-3.5" />
       ) : value > 0 ? (
-        <ArrowUpRight className="size-3" />
+        <ArrowUpRight className="size-3.5" strokeWidth={2.2} />
       ) : (
-        <ArrowDownRight className="size-3" />
+        <ArrowDownRight className="size-3.5" strokeWidth={2.2} />
       )}
       {formatPercent(value)}
     </span>
@@ -142,11 +151,11 @@ export function MiniStat({
   className?: string;
 }) {
   return (
-    <div className={cn('space-y-0.5', className)}>
-      <p className="text-2xs uppercase tracking-wide text-muted-foreground">{label}</p>
+    <div className={cn('space-y-1', className)}>
+      <p className="text-xs text-muted-foreground">{label}</p>
       <p
         className={cn(
-          'text-[15px] font-semibold tabular',
+          'text-base font-bold tabular',
           tone === 'success' && 'text-success',
           tone === 'danger' && 'text-destructive',
           tone === 'muted' && 'text-muted-foreground',

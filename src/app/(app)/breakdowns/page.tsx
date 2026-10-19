@@ -171,6 +171,7 @@ export default function BreakdownsPage() {
         columns={columns}
         getRowId={(report) => report.id}
         isLoading={query.isLoading}
+        isRefetching={query.isRefetching}
         isError={query.isError}
         error={query.error}
         onRetry={() => query.refetch()}

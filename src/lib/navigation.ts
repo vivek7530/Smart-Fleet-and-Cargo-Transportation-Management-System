@@ -1,20 +1,20 @@
 import type { Icon } from '@/components/icons';
 import {
+  Accident,
+  Audit,
   BadgeIndianRupee,
   CircleDollarSign,
   ClipboardList,
-  FileText,
+  Files,
   Fuel,
   LayoutDashboard,
-  LifeBuoy,
+  Manager,
   Package,
   Route,
-  ScrollText,
   Settings,
   ShieldCheck,
+  Steering,
   Truck,
-  UserCog,
-  UserRound,
   Users,
   Wrench,
 } from '@/components/icons';
@@ -59,7 +59,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { label: 'Trucks', href: '/trucks', icon: Truck, roles: STAFF, description: 'The vehicle fleet' },
       { label: 'My Truck', href: '/my-truck', icon: Truck, roles: ['DRIVER'], description: 'The truck assigned to you' },
       { label: 'Cargo', href: '/cargo', icon: Package, roles: STAFF, description: 'Consignments and shipments' },
-      { label: 'Drivers', href: '/drivers', icon: UserRound, roles: STAFF, description: 'Driver roster' },
+      { label: 'Drivers', href: '/drivers', icon: Steering, roles: STAFF, description: 'Driver roster' },
     ],
   },
   {
@@ -90,7 +90,7 @@ export const NAV_SECTIONS: NavSection[] = [
       {
         label: 'Documents',
         href: '/documents',
-        icon: FileText,
+        icon: Files,
         roles: ALL,
         badge: 'expiringDocuments',
         description: 'Insurance, permits and receipts',
@@ -98,7 +98,7 @@ export const NAV_SECTIONS: NavSection[] = [
       {
         label: 'Breakdowns',
         href: '/breakdowns',
-        icon: LifeBuoy,
+        icon: Accident,
         roles: ALL,
         badge: 'openBreakdowns',
         description: 'Roadside incidents',
@@ -110,8 +110,8 @@ export const NAV_SECTIONS: NavSection[] = [
     title: 'Administration',
     items: [
       { label: 'Users', href: '/users', icon: Users, roles: ['ADMIN'], description: 'Everyone in the system' },
-      { label: 'Managers', href: '/managers', icon: UserCog, roles: ['ADMIN'], description: 'Manager accounts and activity' },
-      { label: 'Audit Log', href: '/audit-logs', icon: ScrollText, roles: ['ADMIN'], description: 'Who did what, and when' },
+      { label: 'Managers', href: '/managers', icon: Manager, roles: ['ADMIN'], description: 'Manager accounts and activity' },
+      { label: 'Audit Log', href: '/audit-logs', icon: Audit, roles: ['ADMIN'], description: 'Who did what, and when' },
     ],
   },
   {

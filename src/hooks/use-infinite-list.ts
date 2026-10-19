@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { useInfiniteQuery, type QueryKey } from '@tanstack/react-query';
+import { keepPreviousData, useInfiniteQuery, type QueryKey } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import type { Page } from '@/lib/types';
 
@@ -39,6 +39,9 @@ export function useInfiniteList<T>({
       api.get<Page<T>>(path, { ...params, limit, cursor: pageParam as string | undefined }),
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
     enabled,
+    // Changing a filter keeps the old rows visible (with a progress bar) instead
+    // of collapsing the list back to a skeleton.
+    placeholderData: keepPreviousData,
   });
 
   const items = React.useMemo(

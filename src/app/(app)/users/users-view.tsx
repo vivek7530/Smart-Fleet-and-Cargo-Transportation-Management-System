@@ -218,6 +218,7 @@ export function UsersView({
             columns={columns}
             getRowId={(user) => user.id}
             isLoading={query.isLoading}
+            isRefetching={query.isRefetching}
             isError={query.isError}
             error={query.error}
             onRetry={() => query.refetch()}
@@ -420,6 +421,7 @@ function InvitationsList({ role }: { role?: string }) {
         columns={columns}
         getRowId={(invitation) => invitation.id}
         isLoading={query.isLoading}
+        isRefetching={query.isRefetching}
         isError={query.isError}
         error={query.error}
         onRetry={() => query.refetch()}

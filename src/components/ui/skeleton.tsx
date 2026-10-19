@@ -1,38 +1,40 @@
 import { cn } from '@/lib/utils';
 
 /**
- * Base skeleton block. Every list, card and detail view renders these while
- * loading rather than a bare spinner.
+ * Base skeleton block. Every block on screen shares one sweeping highlight
+ * (see `.skeleton-shimmer`), so loading reads as a single calm wave.
  */
 export function Skeleton({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn('skeleton-shimmer rounded-md', className)} {...props} />;
+  return <div className={cn('skeleton-shimmer rounded-lg', className)} aria-hidden {...props} />;
 }
 
 export function SkeletonText({ lines = 3, className }: { lines?: number; className?: string }) {
   return (
-    <div className={cn('space-y-2', className)}>
+    <div className={cn('space-y-2.5', className)}>
       {Array.from({ length: lines }).map((_, index) => (
         <Skeleton
           key={index}
-          className="h-3"
-          style={{ width: `${index === lines - 1 ? 55 : 88 - index * 6}%` }}
+          className="h-3 rounded-full"
+          style={{ width: `${index === lines - 1 ? 55 : 92 - index * 7}%` }}
         />
       ))}
     </div>
   );
 }
 
-/** Placeholder matching the KPI card layout. */
+/** Matches StatCard: icon tile + trend chip, label, figure, hint. */
 export function SkeletonStatCard() {
   return (
     <div className="surface-card p-5">
-      <div className="flex items-start justify-between gap-3">
-        <div className="space-y-2.5">
-          <Skeleton className="h-3 w-24" />
-          <Skeleton className="h-7 w-28" />
-          <Skeleton className="h-3 w-20" />
-        </div>
-        <Skeleton className="size-9 rounded-lg" />
+      <div className="flex items-start justify-between">
+        <Skeleton className="size-11 rounded-xl" />
+        <Skeleton className="h-6 w-14 rounded-full" />
+      </div>
+      <Skeleton className="mt-4 h-3 w-24 rounded-full" />
+      <Skeleton className="mt-2.5 h-7 w-32 rounded-md" />
+      <div className="mt-3 flex min-h-8 items-end justify-between">
+        <Skeleton className="h-2.5 w-28 rounded-full" />
+        <Skeleton className="h-6 w-20 rounded-md" />
       </div>
     </div>
   );
@@ -51,19 +53,27 @@ export function SkeletonStatGrid({ count = 4 }: { count?: number }) {
 /** Placeholder rows for the shared list component. */
 export function SkeletonRows({ rows = 6, columns = 4 }: { rows?: number; columns?: number }) {
   return (
-    <div className="divide-y divide-border/70">
+    <div className="divide-y divide-border/60">
       {Array.from({ length: rows }).map((_, rowIndex) => (
-        <div key={rowIndex} className="flex items-center gap-4 px-4 py-3.5">
-          <Skeleton className="size-9 shrink-0 rounded-lg" />
+        <div
+          key={rowIndex}
+          className="flex items-center gap-4 px-5 py-4"
+          // Rows further down fade out so the list does not look like a wall.
+          style={{ opacity: 1 - rowIndex * (0.6 / rows) }}
+        >
+          <Skeleton className="size-10 shrink-0 rounded-xl" />
           <div className="flex flex-1 items-center gap-6">
             {Array.from({ length: columns }).map((_, columnIndex) => (
-              <div key={columnIndex} className="flex-1 space-y-1.5">
-                <Skeleton className="h-3" style={{ width: `${70 - columnIndex * 9}%` }} />
-                {columnIndex === 0 ? <Skeleton className="h-2.5 w-1/3" /> : null}
+              <div key={columnIndex} className={cn('flex-1 space-y-2', columnIndex > 1 && 'hidden md:block')}>
+                <Skeleton
+                  className="h-3 rounded-full"
+                  style={{ width: `${72 - ((columnIndex * 13 + rowIndex * 7) % 30)}%` }}
+                />
+                {columnIndex === 0 ? <Skeleton className="h-2.5 w-2/5 rounded-full" /> : null}
               </div>
             ))}
           </div>
-          <Skeleton className="h-6 w-16 rounded-full" />
+          <Skeleton className="h-6 w-20 rounded-full" />
         </div>
       ))}
     </div>
@@ -73,9 +83,9 @@ export function SkeletonRows({ rows = 6, columns = 4 }: { rows?: number; columns
 export function SkeletonChart({ className }: { className?: string }) {
   const heights = [42, 66, 51, 78, 60, 88, 47, 72, 55, 83, 63, 70];
   return (
-    <div className={cn('flex h-[240px] items-end gap-2 px-1', className)}>
+    <div className={cn('flex h-[240px] items-end gap-2.5 px-1', className)}>
       {heights.map((height, index) => (
-        <Skeleton key={index} className="flex-1 rounded-t-md" style={{ height: `${height}%` }} />
+        <Skeleton key={index} className="flex-1 rounded-t-lg rounded-b-sm" style={{ height: `${height}%` }} />
       ))}
     </div>
   );
@@ -85,17 +95,33 @@ export function SkeletonCardGrid({ count = 6 }: { count?: number }) {
   return (
     <div className="grid gap-4 grid-auto-fit">
       {Array.from({ length: count }).map((_, index) => (
-        <div key={index} className="surface-card space-y-3 p-5">
+        <div key={index} className="surface-card space-y-4 p-5">
           <div className="flex items-center gap-3">
-            <Skeleton className="size-10 rounded-lg" />
+            <Skeleton className="size-11 rounded-xl" />
             <div className="flex-1 space-y-2">
-              <Skeleton className="h-3.5 w-2/3" />
-              <Skeleton className="h-2.5 w-1/3" />
+              <Skeleton className="h-3.5 w-2/3 rounded-full" />
+              <Skeleton className="h-2.5 w-1/3 rounded-full" />
             </div>
           </div>
           <SkeletonText lines={2} />
         </div>
       ))}
+    </div>
+  );
+}
+
+/** Thin indeterminate bar for in-place refetches, used instead of a skeleton. */
+export function RefetchBar({ active, className }: { active: boolean; className?: string }) {
+  return (
+    <div
+      className={cn(
+        'pointer-events-none h-0.5 overflow-hidden transition-opacity duration-300',
+        active ? 'opacity-100' : 'opacity-0',
+        className,
+      )}
+      aria-hidden
+    >
+      <div className="h-full w-1/3 animate-progress-slide rounded-full bg-gradient-to-r from-transparent via-primary to-transparent" />
     </div>
   );
 }

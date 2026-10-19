@@ -156,6 +156,7 @@ export default function TransportationCostsPage() {
         columns={columns}
         getRowId={(cost) => cost.id}
         isLoading={query.isLoading}
+        isRefetching={query.isRefetching}
         isError={query.isError}
         error={query.error}
         onRetry={() => query.refetch()}

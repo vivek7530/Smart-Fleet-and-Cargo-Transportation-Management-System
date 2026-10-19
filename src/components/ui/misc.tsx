@@ -36,10 +36,10 @@ Separator.displayName = SeparatorPrimitive.Root.displayName;
 
 const sizeClasses = {
   xs: 'size-6 text-[10px]',
-  sm: 'size-8 text-xs',
-  default: 'size-9 text-[13px]',
-  lg: 'size-11 text-sm',
-  xl: 'size-16 text-lg',
+  sm: 'size-9 text-xs',
+  default: 'size-10 text-[13px]',
+  lg: 'size-12 text-sm',
+  xl: 'size-20 text-xl',
 };
 
 /** Initials avatar tinted by the user's stored colour. */
@@ -57,7 +57,7 @@ function Avatar({
   return (
     <AvatarPrimitive.Root
       className={cn(
-        'inline-flex shrink-0 select-none items-center justify-center overflow-hidden rounded-lg font-semibold',
+        'inline-flex shrink-0 select-none items-center justify-center overflow-hidden rounded-full font-semibold',
         sizeClasses[size],
         avatarClasses(color),
         className,
@@ -94,7 +94,7 @@ const TabsTrigger = React.forwardRef<
   <TabsPrimitive.Trigger
     ref={ref}
     className={cn(
-      'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1 text-[13px] font-medium transition-all',
+      'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1 text-[13px] font-medium transition-all duration-200',
       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50',
       'data-[state=active]:bg-surface data-[state=active]:text-foreground data-[state=active]:shadow-xs',
       '[&_svg]:size-3.5',
@@ -132,7 +132,7 @@ const TooltipContent = React.forwardRef<
       ref={ref}
       sideOffset={sideOffset}
       className={cn(
-        'z-50 overflow-hidden rounded-md bg-slate-900 px-2.5 py-1.5 text-xs text-slate-50 shadow-md dark:bg-slate-700',
+        'z-50 overflow-hidden rounded-lg bg-foreground px-2.5 py-1.5 text-xs font-medium text-background shadow-lg',
         'animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0',
         className,
       )}
@@ -203,7 +203,7 @@ const Checkbox = React.forwardRef<
     {...props}
   >
     <CheckboxPrimitive.Indicator className="flex items-center justify-center text-current">
-      <Check className="size-3" weight="bold" />
+      <Check className="size-3" strokeWidth={2.6} />
     </CheckboxPrimitive.Indicator>
   </CheckboxPrimitive.Root>
 ));

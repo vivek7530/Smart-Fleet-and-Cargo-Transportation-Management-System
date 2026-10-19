@@ -119,6 +119,7 @@ export default function AuditLogsPage() {
         columns={columns}
         getRowId={(entry) => entry.id}
         isLoading={query.isLoading}
+        isRefetching={query.isRefetching}
         isError={query.isError}
         error={query.error}
         onRetry={() => query.refetch()}

@@ -21,7 +21,7 @@ export function EmptyState({ icon, title, description, action, className, compac
         className,
       )}
     >
-      <div className="mb-4 flex size-12 items-center justify-center rounded-xl bg-muted text-muted-foreground [&_svg]:size-5">
+      <div className="mb-4 flex size-12 items-center justify-center rounded-xl border bg-surface text-muted-foreground shadow-card [&_svg]:size-6">
         {icon ?? <SearchX />}
       </div>
       <h3 className="text-sm font-semibold text-foreground">{title}</h3>
@@ -48,7 +48,7 @@ export function ErrorState({
   return (
     <div className={cn('flex flex-col items-center justify-center px-6 py-14 text-center', className)}>
       <div className="mb-4 flex size-12 items-center justify-center rounded-xl bg-destructive-soft text-destructive">
-        <AlertCircle className="size-5" />
+        <AlertCircle className="size-6" />
       </div>
       <h3 className="text-sm font-semibold">{title}</h3>
       {description ? (

@@ -229,6 +229,7 @@ export default function ExpensesPage() {
         columns={columns}
         getRowId={(expense) => expense.id}
         isLoading={query.isLoading}
+        isRefetching={query.isRefetching}
         isError={query.isError}
         error={query.error}
         onRetry={() => query.refetch()}

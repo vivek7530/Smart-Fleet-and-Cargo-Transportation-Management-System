@@ -160,6 +160,7 @@ export default function FuelPage() {
         columns={columns}
         getRowId={(record) => record.id}
         isLoading={query.isLoading}
+        isRefetching={query.isRefetching}
         isError={query.isError}
         error={query.error}
         onRetry={() => query.refetch()}

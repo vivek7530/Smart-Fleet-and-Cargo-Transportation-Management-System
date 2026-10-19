@@ -6,14 +6,18 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { AlertCircle, Eye, EyeOff, LogIn } from '@/components/icons';
+import { AnimatePresence, motion } from 'motion/react';
+import { useQueryClient } from '@tanstack/react-query';
+import { AlertCircle, Eye, EyeOff, Lock, Mail } from '@/components/icons';
 import { toast } from 'sonner';
 import { ApiError } from '@/lib/api';
+import { dashboardQuery } from '@/lib/queries';
 import { useAuth } from '@/components/auth-provider';
 import { AuthLayout } from '@/components/auth/auth-layout';
-import { Button } from '@/components/ui/button';
+import { TruckButton, type TruckButtonPhase } from '@/components/auth/truck-button';
 import { Input } from '@/components/ui/input';
 import { FormField } from '@/components/ui/form-field';
+import { Skeleton } from '@/components/ui/skeleton';
 
 const loginSchema = z.object({
   identifier: z
@@ -39,11 +43,15 @@ export default function LoginPage() {
 
 function LoginFallback() {
   return (
-    <AuthLayout title="Sign in" subtitle="Use the email address or mobile number registered with your account.">
-      <div className="space-y-4">
-        <div className="h-16 animate-pulse rounded-lg bg-muted" />
-        <div className="h-16 animate-pulse rounded-lg bg-muted" />
-        <div className="h-10 animate-pulse rounded-lg bg-muted" />
+    <AuthLayout title="Welcome back" subtitle="Sign in with the email or mobile number registered with your account.">
+      <div className="space-y-5">
+        {[0, 1].map((index) => (
+          <div key={index} className="space-y-2">
+            <Skeleton className="h-3.5 w-36 rounded-full" />
+            <Skeleton className="h-12 w-full rounded-xl" />
+          </div>
+        ))}
+        <Skeleton className="h-12 w-full rounded-xl" />
       </div>
     </AuthLayout>
   );
@@ -52,9 +60,12 @@ function LoginFallback() {
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const queryClient = useQueryClient();
   const { login, user, isLoading } = useAuth();
   const [showPassword, setShowPassword] = React.useState(false);
   const [formError, setFormError] = React.useState<string | null>(null);
+  const [phase, setPhase] = React.useState<TruckButtonPhase>('idle');
+  const welcomeName = React.useRef('');
 
   const next = searchParams.get('next') || '/dashboard';
 
@@ -62,24 +73,36 @@ function LoginForm() {
     register,
     handleSubmit,
     setError,
-    formState: { errors, isSubmitting },
+    formState: { errors },
   } = useForm<LoginValues>({
     resolver: zodResolver(loginSchema),
     defaultValues: { identifier: '', password: '' },
   });
 
-  // Someone already signed in should never sit on the login screen.
+  // Warm everything the sign-in needs while the user is still typing: the
+  // destination route's code, and the API's database connection.
   React.useEffect(() => {
-    if (!isLoading && user) router.replace(next);
-  }, [user, isLoading, router, next]);
+    router.prefetch(next);
+    void fetch('/api/health', { cache: 'no-store' }).catch(() => undefined);
+  }, [router, next]);
+
+  // Someone already signed in should never sit on the login screen — but a
+  // sign-in in progress here navigates itself once the truck has left.
+  React.useEffect(() => {
+    if (phase === 'idle' && !isLoading && user) router.replace(next);
+  }, [user, isLoading, router, next, phase]);
 
   const onSubmit = handleSubmit(async (values) => {
     setFormError(null);
+    setPhase('loading');
     try {
       const account = await login(values.identifier, values.password);
-      toast.success(`Welcome back, ${account.name.split(' ')[0]}`);
-      router.replace(next);
+      welcomeName.current = account.name.split(' ')[0];
+      // Start loading the dashboard now so it is ready when the truck arrives.
+      void queryClient.prefetchQuery(dashboardQuery(account.role));
+      setPhase('success');
     } catch (error) {
+      setPhase('error');
       if (error instanceof ApiError) {
         // Field-level issues take priority over the banner.
         if (error.issues?.length) {
@@ -94,29 +117,43 @@ function LoginForm() {
     }
   });
 
+  const handleDelivered = React.useCallback(() => {
+    toast.success(`Welcome back, ${welcomeName.current}`);
+    router.replace(next);
+  }, [router, next]);
+
   return (
     <AuthLayout
-      title="Sign in"
-      subtitle="Use the email address or mobile number registered with your account."
+      title="Welcome back"
+      subtitle="Sign in with the email or mobile number registered with your account."
       footer={
-        <p className="text-center text-[13px] text-muted-foreground">
-          Invited but not registered yet?{' '}
-          <Link href="/register" className="font-medium text-primary hover:underline">
-            Complete your registration
+        <div className="flex items-center gap-3 rounded-lg border bg-surface px-4 py-3 text-[13px]">
+          <span className="text-muted-foreground">Invited but not registered yet?</span>
+          <Link href="/register" className="ml-auto font-semibold text-primary underline-offset-4 hover:underline">
+            Complete registration
           </Link>
-        </p>
+        </div>
       }
     >
-      <form onSubmit={onSubmit} className="space-y-4" noValidate>
-        {formError ? (
-          <div
-            role="alert"
-            className="flex items-start gap-2.5 rounded-lg border border-destructive/25 bg-destructive-soft px-3.5 py-3 text-[13px] text-destructive"
-          >
-            <AlertCircle className="mt-px size-4 shrink-0" />
-            <span>{formError}</span>
-          </div>
-        ) : null}
+      <form onSubmit={onSubmit} className="space-y-5" noValidate>
+        <AnimatePresence initial={false}>
+          {formError ? (
+            <motion.div
+              key="error"
+              role="alert"
+              initial={{ opacity: 0, height: 0, y: -6 }}
+              animate={{ opacity: 1, height: 'auto', y: 0 }}
+              exit={{ opacity: 0, height: 0, y: -6 }}
+              transition={{ duration: 0.25 }}
+              className="overflow-hidden"
+            >
+              <div className="flex items-start gap-2.5 rounded-xl border border-destructive/25 bg-destructive-soft px-3.5 py-3 text-[13px] text-destructive">
+                <AlertCircle className="mt-px size-[18px] shrink-0" />
+                <span>{formError}</span>
+              </div>
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
 
         <FormField label="Email or mobile number" htmlFor="identifier" required error={errors.identifier?.message}>
           <Input
@@ -125,6 +162,8 @@ function LoginForm() {
             autoFocus
             placeholder="you@company.com or +91XXXXXXXXXX"
             invalid={Boolean(errors.identifier)}
+            startIcon={<Mail />}
+            className="h-11"
             {...register('identifier')}
           />
         </FormField>
@@ -134,13 +173,15 @@ function LoginForm() {
             id="password"
             type={showPassword ? 'text' : 'password'}
             autoComplete="current-password"
-            placeholder="••••••••"
+            placeholder="Enter your password"
             invalid={Boolean(errors.password)}
+            startIcon={<Lock />}
+            className="h-11"
             endIcon={
               <button
                 type="button"
                 onClick={() => setShowPassword((value) => !value)}
-                className="rounded p-0.5 transition-colors hover:text-foreground"
+                className="rounded-md p-1 transition-colors hover:bg-muted hover:text-foreground"
                 aria-label={showPassword ? 'Hide password' : 'Show password'}
                 tabIndex={-1}
               >
@@ -151,10 +192,9 @@ function LoginForm() {
           />
         </FormField>
 
-        <Button type="submit" className="w-full" size="lg" loading={isSubmitting}>
-          {!isSubmitting ? <LogIn /> : null}
+        <TruckButton type="submit" phase={phase} onDelivered={handleDelivered} className="!mt-7">
           Sign in
-        </Button>
+        </TruckButton>
       </form>
     </AuthLayout>
   );

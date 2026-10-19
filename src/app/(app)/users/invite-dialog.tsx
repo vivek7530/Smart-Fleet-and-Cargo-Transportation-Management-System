@@ -78,7 +78,12 @@ export function InviteUserDialog({
   );
 
   React.useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      // Drop the finished invitation once the close animation has played, so
+      // the next open starts on a fresh form instead of the old link.
+      const timer = setTimeout(() => setResult(null), 250);
+      return () => clearTimeout(timer);
+    }
     setResult(null);
     setBannerError(null);
     form.reset({ name: '', email: '', mobile: '', role: defaultRole, channel: 'EMAIL' });
@@ -107,7 +112,7 @@ export function InviteUserDialog({
   const channel = form.watch('channel');
   const errors = form.formState.errors;
 
-  if (result) return <InvitationCreated result={result} onClose={() => onOpenChange(false)} />;
+  if (result) return <InvitationCreated open={open} result={result} onClose={() => onOpenChange(false)} />;
 
   return (
     <ResourceDialog
@@ -226,7 +231,15 @@ export function InviteUserDialog({
  * No email or SMS provider is wired up in this build, so the generated link is
  * handed straight back to the administrator to share.
  */
-function InvitationCreated({ result, onClose }: { result: InviteResult; onClose: () => void }) {
+function InvitationCreated({
+  open,
+  result,
+  onClose,
+}: {
+  open: boolean;
+  result: InviteResult;
+  onClose: () => void;
+}) {
   const [copied, setCopied] = React.useState(false);
 
   const copy = async () => {
@@ -238,7 +251,7 @@ function InvitationCreated({ result, onClose }: { result: InviteResult; onClose:
 
   return (
     <ResourceDialog
-      open
+      open={open}
       onOpenChange={(next) => !next && onClose()}
       title="Invitation ready"
       description={`${result.invitation.name} has been invited as ${result.invitation.role.toLowerCase()}.`}

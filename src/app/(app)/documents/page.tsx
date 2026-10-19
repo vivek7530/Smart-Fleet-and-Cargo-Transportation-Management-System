@@ -215,6 +215,7 @@ export default function DocumentsPage() {
         columns={columns}
         getRowId={(doc) => doc.id}
         isLoading={query.isLoading}
+        isRefetching={query.isRefetching}
         isError={query.isError}
         error={query.error}
         onRetry={() => query.refetch()}

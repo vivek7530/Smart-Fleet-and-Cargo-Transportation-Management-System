@@ -3,6 +3,7 @@
 import * as React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from 'sonner';
+import { MotionConfig } from 'motion/react';
 import { ApiError } from '@/lib/api';
 import { TooltipProvider } from '@/components/ui/misc';
 import { AuthProvider } from '@/components/auth-provider';
@@ -32,19 +33,21 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <ThemeProvider>
-        <AuthProvider>
-          <TooltipProvider delayDuration={250} skipDelayDuration={300}>
-            {children}
-            <Toaster
-              position="bottom-right"
-              richColors
-              closeButton
-              toastOptions={{ className: 'text-[13px]' }}
-            />
-          </TooltipProvider>
-        </AuthProvider>
-      </ThemeProvider>
+      <MotionConfig reducedMotion="user" transition={{ type: 'spring', stiffness: 380, damping: 32 }}>
+        <ThemeProvider>
+          <AuthProvider>
+            <TooltipProvider delayDuration={250} skipDelayDuration={300}>
+              {children}
+              <Toaster
+                position="top-center"
+                richColors
+                closeButton
+                toastOptions={{ className: 'text-[13px] font-sans rounded-xl' }}
+              />
+            </TooltipProvider>
+          </AuthProvider>
+        </ThemeProvider>
+      </MotionConfig>
     </QueryClientProvider>
   );
 }

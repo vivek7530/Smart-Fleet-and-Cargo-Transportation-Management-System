@@ -62,6 +62,19 @@ const config: Config = {
           DEFAULT: 'hsl(var(--popover))',
           foreground: 'hsl(var(--popover-foreground))',
         },
+        sidebar: {
+          DEFAULT: 'hsl(var(--sidebar))',
+          foreground: 'hsl(var(--sidebar-foreground))',
+          muted: 'hsl(var(--sidebar-muted))',
+          accent: 'hsl(var(--sidebar-accent))',
+          active: 'hsl(var(--sidebar-active))',
+          'active-foreground': 'hsl(var(--sidebar-active-foreground))',
+          border: 'hsl(var(--sidebar-border))',
+        },
+        brand: {
+          DEFAULT: '#F26B21',
+          ink: '#0E1A30',
+        },
       },
       borderRadius: {
         lg: 'var(--radius)',
@@ -71,7 +84,7 @@ const config: Config = {
         '2xl': 'calc(var(--radius) + 8px)',
       },
       fontFamily: {
-        sans: ['var(--font-sans)', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        sans: ['var(--font-roboto)', 'Roboto', 'ui-sans-serif', 'system-ui', 'sans-serif'],
         mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
       },
       fontSize: {
@@ -83,6 +96,9 @@ const config: Config = {
         md: '0 4px 12px -2px rgb(16 24 40 / 0.08), 0 2px 4px -2px rgb(16 24 40 / 0.04)',
         lg: '0 12px 28px -8px rgb(16 24 40 / 0.14), 0 4px 10px -4px rgb(16 24 40 / 0.06)',
         pop: '0 16px 40px -12px rgb(16 24 40 / 0.22)',
+        card: '0 1px 2px 0 rgb(0 0 0 / 0.04)',
+        lift: '0 10px 24px -10px rgb(0 0 0 / 0.14), 0 2px 6px -2px rgb(0 0 0 / 0.05)',
+        glow: '0 4px 12px -4px hsl(16 85% 45% / 0.45)',
       },
       keyframes: {
         'accordion-down': {
@@ -100,11 +116,28 @@ const config: Config = {
           from: { opacity: '0', transform: 'translateY(4px)' },
           to: { opacity: '1', transform: 'translateY(0)' },
         },
+        ripple: {
+          from: { transform: 'scale(0)', opacity: '0.22' },
+          to: { transform: 'scale(1)', opacity: '0' },
+        },
+        // Drives in from the left, crosses the button, and leaves on the right.
+        'button-truck': {
+          '0%': { left: '-28px' },
+          '100%': { left: '100%' },
+        },
+        'road-scroll': {
+          from: { backgroundPosition: '0 0' },
+          to: { backgroundPosition: '-20px 0' },
+        },
       },
       animation: {
         'accordion-down': 'accordion-down 0.2s ease-out',
         'accordion-up': 'accordion-up 0.2s ease-out',
         shimmer: 'shimmer 1.8s infinite',
+        'progress-slide': 'progress-slide 1.1s cubic-bezier(0.4, 0, 0.2, 1) infinite',
+        ripple: 'ripple 0.65s cubic-bezier(0.22, 1, 0.36, 1) forwards',
+        'button-truck': 'button-truck 1.25s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite',
+        'road-scroll': 'road-scroll 0.35s linear infinite',
         'fade-in': 'fade-in 0.24s ease-out both',
       },
     },

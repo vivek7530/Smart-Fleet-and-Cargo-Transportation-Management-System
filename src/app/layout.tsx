@@ -1,7 +1,15 @@
 import type { Metadata, Viewport } from 'next';
+import { Roboto } from 'next/font/google';
 import './globals.css';
 import { Providers } from '@/components/providers';
 import { themeScript } from '@/components/theme-provider';
+
+const roboto = Roboto({
+  subsets: ['latin'],
+  weight: 'variable',
+  display: 'swap',
+  variable: '--font-roboto',
+});
 
 export const metadata: Metadata = {
   title: {
@@ -15,8 +23,8 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#f6f7fa' },
-    { media: '(prefers-color-scheme: dark)', color: '#0e1017' },
+    { media: '(prefers-color-scheme: light)', color: '#f8f6f2' },
+    { media: '(prefers-color-scheme: dark)', color: '#090e18' },
   ],
   width: 'device-width',
   initialScale: 1,
@@ -26,7 +34,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" className={roboto.variable} suppressHydrationWarning>
       <head>
         {/* Applies the stored theme before paint so there is no light/dark flash. */}
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />

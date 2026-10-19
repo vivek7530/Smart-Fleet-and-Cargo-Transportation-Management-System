@@ -189,6 +189,7 @@ export function TripsView({ title, description }: { title: string; description: 
         columns={visibleColumns}
         getRowId={(trip) => trip.id}
         isLoading={query.isLoading}
+        isRefetching={query.isRefetching}
         isError={query.isError}
         error={query.error}
         onRetry={() => query.refetch()}
