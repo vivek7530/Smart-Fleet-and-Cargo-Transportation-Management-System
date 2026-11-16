@@ -34,9 +34,28 @@ const tripSchema = z
   .refine(
     (data) => new Date(data.expectedDeliveryDate).getTime() >= new Date(data.startDate).getTime(),
     { message: 'Delivery must be on or after the start date', path: ['expectedDeliveryDate'] },
-  );
+  )
+  .refine((data) => data.startDate >= toDateInput(new Date()), {
+    message: 'Planned trips cannot start in the past.',
+    path: ['startDate'],
+  });
 
 type TripValues = z.infer<typeof tripSchema>;
+
+function newTripDefaults(): TripValues {
+  return {
+    truck: 'NONE',
+    driver: 'NONE',
+    cargo: [],
+    pickupLocation: '',
+    deliveryLocation: '',
+    distanceKm: '',
+    startDate: toDateInput(new Date()),
+    expectedDeliveryDate: toDateInput(new Date(Date.now() + 86_400_000)),
+    revenue: 0,
+    notes: '',
+  };
+}
 
 export function TripFormDialog({
   open,
@@ -52,18 +71,7 @@ export function TripFormDialog({
 
   const form = useForm<TripValues>({
     resolver: zodResolver(tripSchema),
-    defaultValues: {
-      truck: 'NONE',
-      driver: 'NONE',
-      cargo: [],
-      pickupLocation: '',
-      deliveryLocation: '',
-      distanceKm: '',
-      startDate: toDateInput(new Date()),
-      expectedDeliveryDate: toDateInput(new Date(Date.now() + 86_400_000)),
-      revenue: 0,
-      notes: '',
-    },
+    defaultValues: newTripDefaults(),
   });
 
   const { bannerError, setBannerError, handleError } = useMutationErrors<keyof TripValues>((field, message) =>
@@ -89,7 +97,7 @@ export function TripFormDialog({
   const { data: cargoOptions } = useQuery({
     queryKey: ['cargo', 'picker', trip?.id],
     queryFn: async () => {
-      const available = await api.get<Page<Cargo>>('/cargo', { limit: 50, unassigned: 'true' });
+      const available = await api.get<Page<Cargo>>('/cargo', { limit: 50, unassigned: 'true', status: 'PENDING' });
       if (!trip?.cargo?.length) return available.items;
       const existing = trip.cargo;
       const merged = [...existing, ...available.items.filter((item) => !existing.some((c) => c.id === item.id))];
@@ -115,6 +123,8 @@ export function TripFormDialog({
         revenue: trip.revenue,
         notes: trip.notes ?? '',
       });
+    } else {
+      form.reset(newTripDefaults());
     }
   }, [open, trip, form, setBannerError]);
 
@@ -138,6 +148,7 @@ export function TripFormDialog({
       queryClient.invalidateQueries({ queryKey: ['/cargo'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
       toast.success(isEdit ? `Trip ${result.trip.tripCode} updated` : `Trip ${result.trip.tripCode} created`);
+      if (!isEdit) form.reset(newTripDefaults());
       onOpenChange(false);
     },
     onError: handleError,
@@ -202,7 +213,7 @@ export function TripFormDialog({
           </FormField>
 
           <FormField label="Start date" htmlFor="startDate" required error={errors.startDate?.message}>
-            <Input id="startDate" type="date" invalid={Boolean(errors.startDate)} {...form.register('startDate')} />
+            <Input id="startDate" type="date" min={toDateInput(new Date())} invalid={Boolean(errors.startDate)} {...form.register('startDate')} />
           </FormField>
 
           <FormField

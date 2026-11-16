@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { BreakdownReport } from '../../models/BreakdownReport';
 import { Truck } from '../../models/Truck';
 import { Trip } from '../../models/Trip';
+import { Maintenance } from '../../models/Maintenance';
 import { nextCode } from '../../models/Counter';
 import { ApiError } from '../../lib/ApiError';
 import {
@@ -87,6 +88,16 @@ export async function createBreakdown(input: z.infer<typeof createBreakdownSchem
 
   // Attach the report to whatever trip the truck is currently running.
   let tripId = input.trip ?? null;
+  if (tripId) {
+    const selectedTrip = await Trip.findById(tripId).select('truck driver tripCode');
+    if (!selectedTrip) throw ApiError.badRequest('The selected trip could not be found');
+    if (String(selectedTrip.truck) !== String(truck._id)) {
+      throw ApiError.validation('The selected trip does not use this truck');
+    }
+    if (ctx.user.role === 'DRIVER' && String(selectedTrip.driver) !== String(ctx.user._id)) {
+      throw ApiError.forbidden('That trip is not assigned to you');
+    }
+  }
   if (!tripId) {
     const activeTrip = await Trip.findOne({
       truck: truck._id,
@@ -108,7 +119,7 @@ export async function createBreakdown(input: z.infer<typeof createBreakdownSchem
   });
 
   // A serious breakdown takes the truck off the road immediately.
-  if (['HIGH', 'CRITICAL'].includes(report.severity) && truck.status !== 'MAINTENANCE') {
+  if (['HIGH', 'CRITICAL'].includes(report.severity) && truck.status !== 'IN_TRIP' && truck.status !== 'MAINTENANCE') {
     truck.status = 'MAINTENANCE';
     await truck.save();
   }
@@ -142,6 +153,17 @@ export async function updateBreakdownStatus(
   const report = await BreakdownReport.findById(id);
   if (!report) throw ApiError.notFound('That breakdown report could not be found');
 
+  const allowed: Record<string, string[]> = {
+    REPORTED: ['ACKNOWLEDGED', 'IN_PROGRESS', 'RESOLVED', 'CANCELLED'],
+    ACKNOWLEDGED: ['IN_PROGRESS', 'RESOLVED', 'CANCELLED'],
+    IN_PROGRESS: ['RESOLVED', 'CANCELLED'],
+    RESOLVED: [],
+    CANCELLED: [],
+  };
+  if (!allowed[report.status]?.includes(input.status)) {
+    throw ApiError.conflict(`Breakdown ${report.reportCode} cannot move from ${report.status} to ${input.status}`);
+  }
+
   report.status = input.status;
   if (input.resolutionNotes) report.resolutionNotes = input.resolutionNotes;
 
@@ -150,20 +172,32 @@ export async function updateBreakdownStatus(
     report.acknowledgedAt = new Date();
   }
 
-  if (input.status === 'RESOLVED') {
+  if (input.status === 'RESOLVED' || input.status === 'CANCELLED') {
     report.resolvedBy = ctx.user._id;
     report.resolvedAt = new Date();
 
     // Put the truck back into service once nothing else is holding it.
-    const otherOpen = await BreakdownReport.countDocuments({
-      truck: report.truck,
-      _id: { $ne: report._id },
-      status: { $nin: ['RESOLVED', 'CANCELLED'] },
-    });
-    if (otherOpen === 0) {
+    const [otherSevere, inProgressTrip, assignedTrip, activeMaintenance] = await Promise.all([
+      BreakdownReport.countDocuments({
+        truck: report.truck,
+        _id: { $ne: report._id },
+        severity: { $in: ['HIGH', 'CRITICAL'] },
+        status: { $nin: ['RESOLVED', 'CANCELLED'] },
+      }),
+      Trip.exists({ truck: report.truck, status: { $in: ['LOADING', 'IN_TRANSIT'] } }),
+      Trip.exists({ truck: report.truck, status: 'ASSIGNED' }),
+      Maintenance.exists({ truck: report.truck, status: 'IN_PROGRESS' }),
+    ]);
+    if (otherSevere === 0 || inProgressTrip || activeMaintenance) {
       const truck = await Truck.findById(report.truck);
       if (truck && truck.status === 'MAINTENANCE') {
-        truck.status = truck.assignedDriver ? 'ASSIGNED' : 'AVAILABLE';
+        truck.status = activeMaintenance || otherSevere > 0
+          ? 'MAINTENANCE'
+          : inProgressTrip
+            ? 'IN_TRIP'
+            : assignedTrip || truck.assignedDriver
+              ? 'ASSIGNED'
+              : 'AVAILABLE';
         await truck.save();
       }
     }

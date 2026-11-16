@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { DocumentRecord } from '../../models/DocumentRecord';
 import { Truck } from '../../models/Truck';
+import { Trip } from '../../models/Trip';
+import { User } from '../../models/User';
 import { ApiError } from '../../lib/ApiError';
 import {
   dateRangeFilter,
@@ -24,7 +26,7 @@ export const createDocumentSchema = z
   .object({
     name: z.string().trim().min(2, 'Give the document a name').max(200),
     type: z.enum(DOCUMENT_TYPES),
-    ownerType: z.enum(DOCUMENT_OWNER_TYPES),
+    ownerType: z.enum(['TRUCK', 'DRIVER', 'TRIP']),
     truck: objectId.nullable().optional(),
     driver: objectId.nullable().optional(),
     trip: objectId.nullable().optional(),
@@ -141,10 +143,41 @@ export async function expiringDocuments(days = 30) {
 
 export async function createDocument(input: z.infer<typeof createDocumentSchema>, ctx: Ctx) {
   const isDriver = ctx.user.role === 'DRIVER';
+  let tripDriverId: string | null = null;
+
+  if (input.truck) {
+    const truck = await Truck.findById(input.truck).select('assignedDriver');
+    if (!truck) throw ApiError.badRequest('The selected truck could not be found');
+    if (isDriver && (input.ownerType !== 'TRUCK' || String(truck.assignedDriver) !== String(ctx.user._id))) {
+      throw ApiError.forbidden('You can only add documents for the truck assigned to you');
+    }
+  }
+  if (input.driver) {
+    const driver = await User.findOne({ _id: input.driver, role: 'DRIVER' }).select('_id');
+    if (!driver) throw ApiError.badRequest('The selected driver could not be found');
+    if (isDriver && String(driver._id) !== String(ctx.user._id)) {
+      throw ApiError.forbidden('You can only add documents for your own driver profile');
+    }
+  }
+  if (input.trip) {
+    const trip = await Trip.findById(input.trip).select('driver');
+    if (!trip) throw ApiError.badRequest('The selected trip could not be found');
+    tripDriverId = trip.driver ? String(trip.driver) : null;
+    if (input.ownerType === 'TRIP' && input.driver && String(input.driver) !== tripDriverId) {
+      throw ApiError.validation('The selected driver does not match the trip assignment');
+    }
+    if (isDriver && String(trip.driver) !== String(ctx.user._id)) {
+      throw ApiError.forbidden('You can only add documents for trips assigned to you');
+    }
+  }
 
   const record = await DocumentRecord.create({
     ...input,
-    driver: input.driver ?? (input.ownerType === 'DRIVER' ? ctx.user._id : null),
+    driver: input.ownerType === 'DRIVER'
+      ? (isDriver ? ctx.user._id : (input.driver ?? null))
+      : input.ownerType === 'TRIP'
+        ? tripDriverId
+        : null,
     issueDate: input.issueDate ? new Date(input.issueDate) : null,
     expiryDate: input.expiryDate ? new Date(input.expiryDate) : null,
     addedBy: ctx.user._id,
@@ -173,9 +206,23 @@ export async function updateDocument(id: string, input: z.infer<typeof updateDoc
     throw ApiError.forbidden('You can only edit documents you added');
   }
 
+  const complianceFieldsChanged =
+    (input.name !== undefined && input.name !== record.name) ||
+    (input.type !== undefined && input.type !== record.type) ||
+    (input.referenceNumber !== undefined && input.referenceNumber !== record.referenceNumber) ||
+    (input.issuedBy !== undefined && input.issuedBy !== record.issuedBy) ||
+    (input.issueDate !== undefined && new Date(input.issueDate ?? 0).getTime() !== (record.issueDate?.getTime() ?? 0)) ||
+    (input.expiryDate !== undefined && new Date(input.expiryDate ?? 0).getTime() !== (record.expiryDate?.getTime() ?? 0));
+
   Object.assign(record, input);
   if (input.issueDate !== undefined) record.issueDate = input.issueDate ? new Date(input.issueDate) : null;
   if (input.expiryDate !== undefined) record.expiryDate = input.expiryDate ? new Date(input.expiryDate) : null;
+  if (record.status === 'VERIFIED' && complianceFieldsChanged) {
+    record.status = 'PENDING';
+    record.verifiedBy = null;
+    record.verifiedAt = null;
+    record.rejectionReason = undefined;
+  }
   await record.save();
 
   await recordAudit({
@@ -237,6 +284,9 @@ export async function deleteDocument(id: string, ctx: Ctx) {
 
   if (ctx.user.role === 'DRIVER' && String(record.addedBy) !== String(ctx.user._id)) {
     throw ApiError.forbidden('You can only remove documents you added');
+  }
+  if (ctx.user.role === 'DRIVER' && record.status === 'VERIFIED') {
+    throw ApiError.forbidden('Verified compliance documents cannot be removed by drivers');
   }
 
   await DocumentRecord.deleteOne({ _id: record._id });

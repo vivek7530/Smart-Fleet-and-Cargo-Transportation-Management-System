@@ -175,6 +175,7 @@ export function useCommandPalette() {
 
   React.useEffect(() => {
     const handler = (event: KeyboardEvent) => {
+      if (typeof event.key !== 'string') return;
       if (event.key.toLowerCase() === 'k' && (event.metaKey || event.ctrlKey)) {
         event.preventDefault();
         setOpen((previous) => !previous);

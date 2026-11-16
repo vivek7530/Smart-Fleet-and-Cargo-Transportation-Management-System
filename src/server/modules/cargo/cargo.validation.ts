@@ -21,7 +21,7 @@ export const createCargoSchema = z.object({
   handlingInstructions: z.string().trim().max(1000).optional(),
 });
 
-export const updateCargoSchema = createCargoSchema.partial();
+export const updateCargoSchema = createCargoSchema.omit({ status: true }).partial();
 
 export const listCargoQuerySchema = listQuerySchema.extend({
   status: z.enum(CARGO_STATUSES).optional(),

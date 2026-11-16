@@ -3,12 +3,10 @@ import { handle, ok, parseQuery } from '@/server/api/respond';
 import { requireStaff } from '@/server/api/context';
 import {
   buildLeaderboards,
-  financialsFor,
+  financialsForPeriods,
   pickGranularity,
-  previousRange,
   rangeQuerySchema,
   resolveRange,
-  timeSeries,
 } from '@/server/services/reports.service';
 
 export const runtime = 'nodejs';
@@ -22,13 +20,18 @@ export async function GET(request: NextRequest) {
     const range = resolveRange(query.preset, query.from, query.to);
     const granularity = pickGranularity(range, query.granularity);
 
-    const [totals, previousTotals, series, leaderboards] = await Promise.all([
-      financialsFor(range),
-      financialsFor(previousRange(range)),
-      timeSeries(range, granularity),
+    const [financialPeriods, leaderboards] = await Promise.all([
+      financialsForPeriods(range, undefined, granularity),
       buildLeaderboards(range),
     ]);
 
-    return ok({ range, granularity, totals, previousTotals, series, ...leaderboards });
+    return ok({
+      range,
+      granularity,
+      totals: financialPeriods.current,
+      previousTotals: financialPeriods.previous,
+      series: financialPeriods.series ?? [],
+      ...leaderboards,
+    });
   });
 }

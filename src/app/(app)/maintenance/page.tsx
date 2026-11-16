@@ -121,11 +121,16 @@ export default function MaintenancePage() {
     },
     {
       key: 'cost',
-      header: 'Cost',
+      header: 'Estimated / actual',
       width: 'minmax(110px, 0.7fr)',
       sortKey: 'cost',
       align: 'right',
-      render: (record) => <span className="font-semibold tabular">{formatCurrency(record.cost)}</span>,
+      render: (record) => record.status === 'COMPLETED' ? (
+        <div className="text-right">
+          <p className="font-semibold tabular">Actual {formatCurrency(record.cost)}</p>
+          <p className="text-[11px] text-muted-foreground tabular">Estimate {formatCurrency(record.estimatedCost ?? 0)} · variance {formatCurrency(record.cost - (record.estimatedCost ?? 0))}</p>
+        </div>
+      ) : <span className="font-semibold tabular">Estimate {formatCurrency(record.estimatedCost ?? 0)}</span>,
     },
   ];
 
@@ -197,7 +202,7 @@ export default function MaintenancePage() {
           <div className="space-y-1">
             <div className="flex items-center justify-between gap-2">
               <span className="font-medium">{humanise(record.type)}</span>
-              <span className="font-semibold tabular">{formatCurrency(record.cost)}</span>
+              <span className="text-right font-semibold tabular">{record.status === 'COMPLETED' ? `Actual ${formatCurrency(record.cost)} · Est. ${formatCurrency(record.estimatedCost ?? 0)}` : `Est. ${formatCurrency(record.estimatedCost ?? 0)}`}</span>
             </div>
             <p className="truncate text-xs text-muted-foreground">{record.description}</p>
             <p className="text-xs text-muted-foreground">
@@ -255,10 +260,18 @@ const maintenanceSchema = z.object({
   type: z.enum(MAINTENANCE_TYPES),
   description: z.string().trim().min(3, 'Describe the work carried out').max(2000),
   cost: z.coerce.number({ invalid_type_error: 'Enter the cost' }).min(0, 'Cost cannot be negative'),
+  estimatedPartsCost: z.coerce.number().min(0).default(0),
+  estimatedLabourCost: z.coerce.number().min(0).default(0),
+  estimatedOtherCost: z.coerce.number().min(0).default(0),
+  estimatedTax: z.coerce.number().min(0).default(0),
+  actualPartsCost: z.coerce.number().min(0).default(0),
+  actualLabourCost: z.coerce.number().min(0).default(0),
+  actualOtherCost: z.coerce.number().min(0).default(0),
+  actualTax: z.coerce.number().min(0).default(0),
   date: z.string().min(1, 'Choose the service date'),
   serviceProvider: z.string().trim().max(160).optional(),
   nextServiceDate: z.string().optional(),
-  odometerKm: z.union([z.literal(''), z.coerce.number().min(0)]).optional(),
+  odometerKm: z.union([z.literal(''), z.coerce.number().min(0).multipleOf(0.1)]).optional(),
   status: z.enum(MAINTENANCE_STATUSES),
 });
 
@@ -283,6 +296,14 @@ function MaintenanceFormDialog({
       type: 'ROUTINE_SERVICE',
       description: '',
       cost: 0,
+      estimatedPartsCost: 0,
+      estimatedLabourCost: 0,
+      estimatedOtherCost: 0,
+      estimatedTax: 0,
+      actualPartsCost: 0,
+      actualLabourCost: 0,
+      actualOtherCost: 0,
+      actualTax: 0,
       date: toDateInput(new Date()),
       serviceProvider: '',
       nextServiceDate: '',
@@ -302,6 +323,39 @@ function MaintenanceFormDialog({
     staleTime: 30_000,
   });
 
+  const selectedTruck = form.watch('truck');
+  const selectedType = form.watch('type');
+  const { data: estimateHistory } = useQuery({
+    queryKey: ['maintenance', 'estimate-history', selectedTruck, selectedType],
+    queryFn: () => api.get<Page<MaintenanceRecord>>('/maintenance', {
+      truck: selectedTruck,
+      type: selectedType,
+      status: 'COMPLETED',
+      sortBy: 'date',
+      sortDir: 'desc',
+      limit: 10,
+    }),
+    enabled: open && !isEdit && Boolean(selectedTruck && selectedType),
+    staleTime: 60_000,
+  });
+
+  React.useEffect(() => {
+    const previous = estimateHistory?.items[0];
+    if (!open || isEdit || !previous) return;
+    const suggestedTotal = previous.estimatedCost || previous.cost || 0;
+    const hasBreakdown = (previous.estimatedPartsCost ?? 0) + (previous.estimatedLabourCost ?? 0) +
+      (previous.estimatedOtherCost ?? 0) + (previous.estimatedTax ?? 0) > 0;
+    const fields: [keyof MaintenanceValues, number][] = [
+      ['estimatedPartsCost', hasBreakdown ? previous.estimatedPartsCost ?? 0 : suggestedTotal],
+      ['estimatedLabourCost', hasBreakdown ? previous.estimatedLabourCost ?? 0 : 0],
+      ['estimatedOtherCost', hasBreakdown ? previous.estimatedOtherCost ?? 0 : 0],
+      ['estimatedTax', hasBreakdown ? previous.estimatedTax ?? 0 : 0],
+    ];
+    for (const [field, value] of fields) {
+      if (!form.getFieldState(field).isDirty) form.setValue(field, value);
+    }
+  }, [estimateHistory, form, isEdit, open]);
+
   React.useEffect(() => {
     if (!open) return;
     setBannerError(null);
@@ -311,6 +365,14 @@ function MaintenanceFormDialog({
         type: record.type,
         description: record.description,
         cost: record.cost,
+        estimatedPartsCost: record.estimatedPartsCost ?? 0,
+        estimatedLabourCost: record.estimatedLabourCost ?? 0,
+        estimatedOtherCost: record.estimatedOtherCost ?? 0,
+        estimatedTax: record.estimatedTax ?? 0,
+        actualPartsCost: record.actualPartsCost ?? 0,
+        actualLabourCost: record.actualLabourCost ?? 0,
+        actualOtherCost: record.actualOtherCost ?? 0,
+        actualTax: record.actualTax ?? 0,
         date: toDateInput(record.date),
         serviceProvider: record.serviceProvider ?? '',
         nextServiceDate: toDateInput(record.nextServiceDate),
@@ -343,13 +405,21 @@ function MaintenanceFormDialog({
   });
 
   const errors = form.formState.errors;
+  const estimateTotal = [
+    form.watch('estimatedPartsCost'), form.watch('estimatedLabourCost'),
+    form.watch('estimatedOtherCost'), form.watch('estimatedTax'),
+  ].reduce((total, value) => total + Number(value || 0), 0);
+  const actualTotal = [
+    form.watch('actualPartsCost'), form.watch('actualLabourCost'),
+    form.watch('actualOtherCost'), form.watch('actualTax'),
+  ].reduce((total, value) => total + Number(value || 0), 0);
 
   return (
     <ResourceDialog
       open={open}
       onOpenChange={onOpenChange}
       title={isEdit ? 'Edit maintenance record' : 'Log maintenance'}
-      description="Scheduled or in-progress work takes the truck off the road until it is completed."
+      description="Future maintenance reserves only its service date. Work in progress takes the truck off the road."
       submitLabel={isEdit ? 'Save changes' : 'Log maintenance'}
       loading={mutation.isPending}
       error={bannerError}
@@ -404,8 +474,34 @@ function MaintenanceFormDialog({
       </FormField>
 
       <FormGrid>
-        <FormField label="Cost (₹)" htmlFor="cost" required error={errors.cost?.message}>
-          <Input id="cost" type="number" invalid={Boolean(errors.cost)} {...form.register('cost')} />
+        <FormField label="Parts estimate (₹)" htmlFor="estimatedPartsCost" hint={!isEdit && estimateHistory?.items[0] ? 'Suggested from this truck’s latest completed service of this type.' : undefined}>
+          <Input id="estimatedPartsCost" type="number" min="0" step="0.01" {...form.register('estimatedPartsCost')} />
+        </FormField>
+        <FormField label="Labour estimate (₹)" htmlFor="estimatedLabourCost">
+          <Input id="estimatedLabourCost" type="number" min="0" step="0.01" {...form.register('estimatedLabourCost')} />
+        </FormField>
+        <FormField label="Other estimate (₹)" htmlFor="estimatedOtherCost">
+          <Input id="estimatedOtherCost" type="number" min="0" step="0.01" {...form.register('estimatedOtherCost')} />
+        </FormField>
+        <FormField label="Estimate tax (₹)" htmlFor="estimatedTax">
+          <Input id="estimatedTax" type="number" min="0" step="0.01" {...form.register('estimatedTax')} />
+        </FormField>
+
+        <FormField label="Actual parts (₹)" htmlFor="actualPartsCost">
+          <Input id="actualPartsCost" type="number" min="0" step="0.01" {...form.register('actualPartsCost')} />
+        </FormField>
+        <FormField label="Actual labour (₹)" htmlFor="actualLabourCost">
+          <Input id="actualLabourCost" type="number" min="0" step="0.01" {...form.register('actualLabourCost')} />
+        </FormField>
+        <FormField label="Actual other (₹)" htmlFor="actualOtherCost">
+          <Input id="actualOtherCost" type="number" min="0" step="0.01" {...form.register('actualOtherCost')} />
+        </FormField>
+        <FormField label="Actual tax (₹)" htmlFor="actualTax">
+          <Input id="actualTax" type="number" min="0" step="0.01" {...form.register('actualTax')} />
+        </FormField>
+
+        <FormField label="Legacy / total actual cost (₹)" htmlFor="cost" error={errors.cost?.message}>
+          <Input id="cost" type="number" min="0" step="0.01" invalid={Boolean(errors.cost)} {...form.register('cost')} />
         </FormField>
 
         <FormField label="Service date" htmlFor="maintenance-date" required error={errors.date?.message}>
@@ -420,8 +516,8 @@ function MaintenanceFormDialog({
           <Input id="nextServiceDate" type="date" {...form.register('nextServiceDate')} />
         </FormField>
 
-        <FormField label="Odometer (km)" htmlFor="maintenance-odometer">
-          <Input id="maintenance-odometer" type="number" {...form.register('odometerKm')} />
+        <FormField label="Odometer (km)" htmlFor="maintenance-odometer" hint={record?.odometerKm != null ? 'Submitted readings are immutable; corrections are audited.' : 'Must be at least the truck’s latest verified reading.'}>
+          <Input id="maintenance-odometer" type="number" min={trucks?.items.find((truck) => truck.id === form.watch('truck'))?.odometerKm ?? 0} step="0.1" disabled={record?.odometerKm != null} {...form.register('odometerKm')} />
         </FormField>
 
         <FormField label="Status">
@@ -441,6 +537,10 @@ function MaintenanceFormDialog({
             </SelectContent>
           </Select>
         </FormField>
+        <div className="flex items-center justify-between rounded-lg bg-muted/50 px-3 py-2 text-sm sm:col-span-2">
+          <span>Estimated total: <strong className="tabular">{formatCurrency(estimateTotal)}</strong></span>
+          <span>Actual total: <strong className="tabular">{formatCurrency(actualTotal || Number(form.watch('cost') || 0))}</strong></span>
+        </div>
       </FormGrid>
     </ResourceDialog>
   );

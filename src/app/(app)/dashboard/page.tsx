@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import dynamic from 'next/dynamic';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/components/auth-provider';
 import { dashboardQuery, DEFAULT_DASHBOARD_RANGE } from '@/lib/queries';
@@ -10,8 +11,15 @@ import { PageHeader } from '@/components/data/list-toolbar';
 import { RefetchBar, Skeleton, SkeletonStatGrid } from '@/components/ui/skeleton';
 import { ErrorState } from '@/components/ui/empty-state';
 import { FadeIn } from '@/components/motion/primitives';
-import { StaffDashboardView } from './staff-dashboard';
-import { DriverDashboardView } from './driver-dashboard';
+
+const StaffDashboardView = dynamic(
+  () => import('./staff-dashboard').then((module) => module.StaffDashboardView),
+  { loading: () => <StaffDashboardSkeleton /> },
+);
+const DriverDashboardView = dynamic(
+  () => import('./driver-dashboard').then((module) => module.DriverDashboardView),
+  { loading: () => <DriverDashboardSkeleton /> },
+);
 
 export default function DashboardPage() {
   const { user } = useAuth();

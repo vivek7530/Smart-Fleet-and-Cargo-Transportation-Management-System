@@ -5,7 +5,13 @@ import { Trip } from '../../models/Trip';
 import { Truck } from '../../models/Truck';
 import { User, type UserDocument } from '../../models/User';
 import { AuditLog } from '../../models/AuditLog';
+import { DriverExpense } from '../../models/DriverExpense';
+import { FuelRecord } from '../../models/FuelRecord';
+import { DocumentRecord } from '../../models/DocumentRecord';
+import { BreakdownReport } from '../../models/BreakdownReport';
+import { Maintenance } from '../../models/Maintenance';
 import { ApiError } from '../../lib/ApiError';
+import { assertDriverNameAvailable } from '../../lib/driver-name';
 import {
   dateRangeFilter,
   mergeFilters,
@@ -41,6 +47,8 @@ export async function inviteUser(input: InviteUserInput, ctx: Ctx) {
   const channel = input.channel ?? (input.email ? 'EMAIL' : 'MOBILE');
   const lockedContactField = channel === 'EMAIL' ? 'email' : 'mobile';
   const destination = channel === 'EMAIL' ? input.email! : input.mobile!;
+
+  if (input.role === 'DRIVER') await assertDriverNameAvailable(input.name);
 
   if (input.email) await assertContactAvailable('email', input.email);
   if (input.mobile) await assertContactAvailable('mobile', input.mobile);
@@ -187,6 +195,10 @@ export async function updateUser(id: string, input: UpdateUserInput, ctx: Ctx) {
     await assertNotLastAdmin(String(user._id));
   }
 
+  if ((input.name || input.role === 'DRIVER') && (input.role ?? user.role) === 'DRIVER') {
+    await assertDriverNameAvailable(input.name ?? user.name, String(user._id));
+  }
+
   // The channel that delivered the invitation stays immutable for the lifetime
   // of the account, exactly as it is during registration.
   if (input.email && user.lockedContactField === 'email' && input.email !== user.email) {
@@ -256,10 +268,20 @@ export async function deleteUser(id: string, ctx: Ctx) {
   if (!user) throw ApiError.notFound('That user could not be found');
   if (user.role === 'ADMIN') await assertNotLastAdmin(id);
 
-  // Refuse to orphan live operational data.
-  const [activeTrips, assignedTrucks] = await Promise.all([
+  // Refuse to orphan operational history; suspension preserves identity links.
+  const [activeTrips, assignedTrucks, hasHistory] = await Promise.all([
     Trip.countDocuments({ driver: user._id, status: { $in: ['ASSIGNED', 'LOADING', 'IN_TRANSIT'] } }),
     Truck.countDocuments({ assignedDriver: user._id }),
+    user.role === 'DRIVER'
+      ? Promise.all([
+          Trip.exists({ driver: user._id }),
+          DriverExpense.exists({ driver: user._id }),
+          FuelRecord.exists({ driver: user._id }),
+          DocumentRecord.exists({ $or: [{ driver: user._id }, { addedBy: user._id }] }),
+          BreakdownReport.exists({ driver: user._id }),
+          Maintenance.exists({ createdBy: user._id }),
+        ]).then((references) => references.some(Boolean))
+      : Promise.resolve(false),
   ]);
 
   if (activeTrips > 0) {
@@ -271,6 +293,9 @@ export async function deleteUser(id: string, ctx: Ctx) {
     throw ApiError.conflict(
       `${user.name} is still assigned to ${assignedTrucks} truck${assignedTrucks > 1 ? 's' : ''}. Unassign them first.`,
     );
+  }
+  if (hasHistory) {
+    throw ApiError.conflict('This driver has operational history. Suspend the account instead of deleting it.');
   }
 
   await Promise.all([

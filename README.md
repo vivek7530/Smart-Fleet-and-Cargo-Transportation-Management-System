@@ -204,8 +204,8 @@ and expire after `INVITATION_EXPIRES_HOURS` (72 by default).
 ## Trip lifecycle
 
 ```
-Create trip → assign truck → assign driver → load cargo → start trip
-   → in transit → delivered → complete → revenue / expenses / profit settled
+Create trip → reserve truck and driver dates → load cargo → record start odometer
+   → in transit → delivered → record closing odometer → complete and settle finances
 ```
 
 Statuses: `PLANNED · ASSIGNED · LOADING · IN_TRANSIT · DELIVERED · COMPLETED · CANCELLED`.
@@ -214,6 +214,25 @@ Only forward transitions the API recognises are allowed; anything else is
 rejected with a `409`. Completing a trip is blocked while any driver expense on
 it is still awaiting review, and on completion the trip's transport costs,
 approved driver expenses and fuel are rolled up so profit is final.
+
+Planned trip dates cannot be in the past. Resource assignment checks overlapping
+trip and maintenance windows so a later non-overlapping trip can be reserved
+while a truck is currently in transit. A trip that remains in PLANNED, ASSIGNED,
+or LOADING after its planned date is flagged as start overdue.
+
+Past operations use the administrator-only `POST /api/trips/historical` workflow.
+It requires actual start/delivery dates and both odometer readings. Normal trip
+forms cannot be used to backdate a planned trip.
+
+Trip start and completion require one odometer reading each. Fuel and maintenance
+readings can only advance the truck's verified mileage. Normal resource edits do
+not alter submitted readings; authorized staff corrections go through
+`POST /api/odometer/corrections` and are written to the audit log.
+
+Maintenance records keep estimates separate from completed actual cost. Estimate
+components can be suggested from the truck's most recent completed job of the
+same type; managers can edit the suggestion. Dashboard actual expenditure uses
+completed jobs, while scheduled and in-progress estimates are displayed separately.
 
 ---
 
@@ -317,6 +336,7 @@ GET/PATCH/DELETE /api/cargo/:id
 GET    /api/trips                   POST   /api/trips
 GET/PATCH/DELETE /api/trips/:id
 POST   /api/trips/:id/start | /complete | /cancel | /status
+POST   /api/trips/historical           POST /api/odometer/corrections
 
 GET/POST /api/fuel                  PATCH/DELETE /api/fuel/:id
 GET/POST /api/maintenance           PATCH/DELETE /api/maintenance/:id

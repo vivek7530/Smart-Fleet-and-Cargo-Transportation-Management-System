@@ -11,6 +11,7 @@ import {
 export interface UserDocument extends Document {
   _id: Types.ObjectId;
   name: string;
+  nameKey?: string;
   email?: string | null;
   mobile?: string | null;
   passwordHash?: string;
@@ -38,6 +39,7 @@ export interface UserDocument extends Document {
 const userSchema = new Schema<UserDocument>(
   {
     name: { type: String, required: true, trim: true, maxlength: 120 },
+    nameKey: { type: String, select: false },
     // `sparse` keeps the unique constraint while allowing users who only have a mobile.
     email: {
       type: String,
@@ -83,6 +85,14 @@ const userSchema = new Schema<UserDocument>(
 userSchema.index({ role: 1, status: 1, createdAt: -1 });
 userSchema.index({ createdAt: -1 });
 userSchema.index({ name: 'text', email: 'text', mobile: 'text' });
+userSchema.index(
+  { nameKey: 1 },
+  { unique: true, partialFilterExpression: { role: 'DRIVER', nameKey: { $type: 'string' } } },
+);
+
+userSchema.pre('validate', function () {
+  this.nameKey = this.role === 'DRIVER' ? this.name.trim().replace(/\s+/g, ' ').toLocaleLowerCase('en') : undefined;
+});
 
 export const User: Model<UserDocument> =
   (models.User as Model<UserDocument> | undefined) ?? model<UserDocument>('User', userSchema);

@@ -247,7 +247,7 @@ const fuelSchema = z.object({
   pricePerLitre: z.coerce
     .number({ invalid_type_error: 'Enter the price per litre' })
     .min(0.1, 'Price per litre must be greater than zero'),
-  odometerKm: z.union([z.literal(''), z.coerce.number().min(0)]).optional(),
+  odometerKm: z.union([z.literal(''), z.coerce.number().min(0).multipleOf(0.1)]).optional(),
   station: z.string().trim().max(160).optional(),
   location: z.string().trim().max(160).optional(),
   paymentMode: z.enum(PAYMENT_MODES),
@@ -463,8 +463,8 @@ function FuelFormDialog({
           />
         </FormField>
 
-        <FormField label="Odometer (km)" htmlFor="odometerKm">
-          <Input id="odometerKm" type="number" {...form.register('odometerKm')} />
+        <FormField label="Odometer (km)" htmlFor="odometerKm" hint={record?.odometerKm != null ? 'Submitted readings are immutable; corrections are audited.' : 'Must be at least the truck’s latest verified reading.'}>
+          <Input id="odometerKm" type="number" min={trucks?.items.find((truck) => truck.id === form.watch('truck'))?.odometerKm ?? 0} step="0.1" disabled={record?.odometerKm != null} {...form.register('odometerKm')} />
         </FormField>
 
         <FormField label="Station" htmlFor="station">

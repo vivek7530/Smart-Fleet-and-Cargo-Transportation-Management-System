@@ -157,7 +157,7 @@ export function InviteUserDialog({
       <FormField label="Full name" htmlFor="invite-name" required error={errors.name?.message}>
         <Input
           id="invite-name"
-          placeholder="John Mathew"
+
           invalid={Boolean(errors.name)}
           {...form.register('name')}
         />
@@ -202,7 +202,7 @@ export function InviteUserDialog({
         <Input
           id="invite-email"
           type="email"
-          placeholder="john@company.com"
+
           invalid={Boolean(errors.email)}
           {...form.register('email')}
         />
@@ -218,7 +218,7 @@ export function InviteUserDialog({
         <Input
           id="invite-mobile"
           type="tel"
-          placeholder="+91XXXXXXXXXX"
+
           invalid={Boolean(errors.mobile)}
           {...form.register('mobile')}
         />

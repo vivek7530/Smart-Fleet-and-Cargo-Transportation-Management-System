@@ -1,15 +1,7 @@
 import type { Metadata, Viewport } from 'next';
-import { Roboto } from 'next/font/google';
 import './globals.css';
 import { Providers } from '@/components/providers';
 import { themeScript } from '@/components/theme-provider';
-
-const roboto = Roboto({
-  subsets: ['latin'],
-  weight: 'variable',
-  display: 'swap',
-  variable: '--font-roboto',
-});
 
 export const metadata: Metadata = {
   title: {
@@ -34,7 +26,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={roboto.variable} suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning>
       <head>
         {/* Applies the stored theme before paint so there is no light/dark flash. */}
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />

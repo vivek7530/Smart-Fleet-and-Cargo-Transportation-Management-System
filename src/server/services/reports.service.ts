@@ -32,36 +32,38 @@ export interface DateRange {
 /** Resolves a named preset (or an explicit range) into concrete boundaries. */
 export function resolveRange(preset?: string, from?: string, to?: string): DateRange {
   const now = new Date();
-  const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+  const today = indiaParts(now);
+  const endOfToday = endOfIndiaDay(now);
 
   if (preset === 'custom' && (from || to)) {
     return {
-      from: from ? startOfDay(new Date(from)) : new Date(now.getFullYear(), 0, 1),
-      to: to ? endOfDay(new Date(to)) : endOfToday,
+      from: from ? startOfIndiaDay(new Date(from)) : indiaDateUtc(today.year, 1, 1),
+      to: to ? endOfIndiaDay(new Date(to)) : endOfToday,
     };
   }
 
   switch (preset) {
     case 'today':
-      return { from: startOfDay(now), to: endOfToday };
+      return { from: startOfIndiaDay(now), to: endOfToday };
     case 'week': {
       // Weeks start on Monday.
-      const day = (now.getDay() + 6) % 7;
-      const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - day);
+      const weekday = new Date(Date.UTC(today.year, today.month - 1, today.day)).getUTCDay();
+      const day = (weekday + 6) % 7;
+      const monday = indiaDateUtc(today.year, today.month - 1, today.day - day);
       return { from: monday, to: endOfToday };
     }
     case 'last-month': {
-      const first = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      const last = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+      const first = indiaDateUtc(today.year, today.month - 1, 1);
+      const last = new Date(indiaDateUtc(today.year, today.month, 1).getTime() - 1);
       return { from: first, to: last };
     }
     case 'year':
-      return { from: new Date(now.getFullYear(), 0, 1), to: endOfToday };
+      return { from: indiaDateUtc(today.year, 1, 1), to: endOfToday };
     case 'all':
-      return { from: new Date(2000, 0, 1), to: endOfToday };
+      return { from: indiaDateUtc(2000, 1, 1), to: endOfToday };
     case 'month':
     default:
-      return { from: new Date(now.getFullYear(), now.getMonth(), 1), to: endOfToday };
+      return { from: indiaDateUtc(today.year, today.month, 1), to: endOfToday };
   }
 }
 
@@ -79,11 +81,29 @@ export function pickGranularity(range: DateRange, requested?: Granularity): Gran
   return 'month';
 }
 
-function startOfDay(date: Date) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+function indiaParts(date: Date) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Kolkata', year: 'numeric', month: 'numeric', day: 'numeric',
+  }).formatToParts(date);
+  return {
+    year: Number(parts.find((part) => part.type === 'year')?.value),
+    month: Number(parts.find((part) => part.type === 'month')?.value),
+    day: Number(parts.find((part) => part.type === 'day')?.value),
+  };
 }
-function endOfDay(date: Date) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
+
+function indiaDateUtc(year: number, month: number, day: number) {
+  return new Date(Date.UTC(year, month - 1, day) - 330 * 60_000);
+}
+
+function startOfIndiaDay(date: Date) {
+  const parts = indiaParts(date);
+  return indiaDateUtc(parts.year, parts.month, parts.day);
+}
+
+function endOfIndiaDay(date: Date) {
+  const parts = indiaParts(date);
+  return new Date(indiaDateUtc(parts.year, parts.month, parts.day + 1).getTime() - 1);
 }
 
 async function sumOf(
@@ -104,11 +124,12 @@ async function sumOf(
 export async function financialsFor(range: DateRange, driverId?: string) {
   const driverTripMatch = driverId ? { driver: new Types.ObjectId(driverId) } : {};
 
-  const [revenue, fuel, maintenance, driverExpenses, transportation] = await Promise.all([
-    sumOf(Trip, 'revenue', 'startDate', range, { status: { $ne: 'CANCELLED' }, ...driverTripMatch }),
+  const [revenue, fuel, maintenance, estimatedMaintenance, driverExpenses, transportation] = await Promise.all([
+    sumOf(Trip, 'revenue', 'completedAt', range, { status: 'COMPLETED', ...driverTripMatch }),
     sumOf(FuelRecord, 'totalCost', 'date', range, driverId ? { driver: new Types.ObjectId(driverId) } : {}),
     // Maintenance is a fleet-level cost, so it is excluded from a driver's own view.
-    driverId ? Promise.resolve(0) : sumOf(Maintenance, 'cost', 'date', range),
+    driverId ? Promise.resolve(0) : sumOf(Maintenance, 'cost', 'date', range, { status: 'COMPLETED' }),
+    driverId ? Promise.resolve(0) : sumOf(Maintenance, 'estimatedCost', 'date', range, { status: { $in: ['SCHEDULED', 'IN_PROGRESS'] } }),
     sumOf(DriverExpense, 'amount', 'date', range, {
       status: 'APPROVED',
       ...(driverId ? { driver: new Types.ObjectId(driverId) } : {}),
@@ -122,11 +143,208 @@ export async function financialsFor(range: DateRange, driverId?: string) {
     revenue,
     fuelExpenses: fuel,
     maintenanceExpenses: maintenance,
+    estimatedMaintenanceExpenses: estimatedMaintenance,
     driverExpenses,
     transportationCosts: transportation,
     totalExpenses,
     profit: round(revenue - totalExpenses),
     margin: revenue > 0 ? round(((revenue - totalExpenses) / revenue) * 100) : 0,
+  };
+}
+
+/** Fetch current and previous period totals in one indexed scan per collection. */
+export async function financialsForPeriods(
+  range: DateRange,
+  previous = previousRange(range),
+  granularity?: Granularity,
+) {
+  const seriesOptions = granularity ? { granularity, countTrips: true } : undefined;
+  const [revenue, fuel, maintenance, driverExpenses, transportation] = await Promise.all([
+    periodTotals(Trip, 'completedAt', 'revenue', range, previous, { status: 'COMPLETED' }, {}, {}, seriesOptions),
+    periodTotals(FuelRecord, 'date', 'totalCost', range, previous, {}, {}, {}, seriesOptions),
+    periodTotals(Maintenance, 'date', 'cost', range, previous, {}, {
+      estimatedCurrent: [
+        { $match: { date: { $gte: range.from, $lte: range.to }, status: { $in: ['SCHEDULED', 'IN_PROGRESS'] } } },
+        { $group: { _id: null, total: { $sum: '$estimatedCost' } } },
+      ],
+      estimatedPrevious: [
+        { $match: { date: { $gte: previous.from, $lte: previous.to }, status: { $in: ['SCHEDULED', 'IN_PROGRESS'] } } },
+        { $group: { _id: null, total: { $sum: '$estimatedCost' } } },
+      ],
+    }, { status: 'COMPLETED' }, seriesOptions),
+    periodTotals(DriverExpense, 'date', 'amount', range, previous, { status: 'APPROVED' }, {}, {}, seriesOptions),
+    periodTotals(TransportationCost, 'date', 'amount', range, previous, {}, {}, {}, seriesOptions),
+  ]);
+
+  const currentValues = {
+    revenue: revenue.current,
+    fuel: fuel.current,
+    maintenance: maintenance.current,
+    driverExpenses: driverExpenses.current,
+    transportation: transportation.current,
+  };
+  const previousValues = {
+    revenue: revenue.previous,
+    fuel: fuel.previous,
+    maintenance: maintenance.previous,
+    driverExpenses: driverExpenses.previous,
+    transportation: transportation.previous,
+  };
+  return {
+    current: financialSummary(currentValues, maintenance.estimatedCurrent ?? 0),
+    previous: financialSummary(previousValues, maintenance.estimatedPrevious ?? 0),
+    ...(granularity
+      ? {
+          series: mergePeriodSeries(
+            range,
+            granularity,
+            revenue.series ?? [],
+            fuel.series ?? [],
+            maintenance.series ?? [],
+            driverExpenses.series ?? [],
+            transportation.series ?? [],
+          ),
+        }
+      : {}),
+  };
+}
+
+interface PeriodSeriesPoint {
+  _id: Date;
+  total: number;
+  trips?: number;
+}
+
+interface PeriodFacet {
+  current?: { total: number }[];
+  previous?: { total: number }[];
+  estimatedCurrent?: { total: number }[];
+  estimatedPrevious?: { total: number }[];
+  series?: PeriodSeriesPoint[];
+}
+
+async function periodTotals(
+  model: { aggregate: (pipeline: PipelineStage[]) => Promise<PeriodFacet[]> },
+  dateField: string,
+  valueField: string,
+  range: DateRange,
+  previous: DateRange,
+  match: Record<string, unknown> = {},
+  additionalFacets: Record<string, PipelineStage.FacetPipelineStage[]> = {},
+  periodMatch: Record<string, unknown> = {},
+  seriesOptions?: { granularity: Granularity; countTrips?: boolean },
+): Promise<{
+  current: number;
+  previous: number;
+  estimatedCurrent?: number;
+  estimatedPrevious?: number;
+  series?: PeriodSeriesPoint[];
+}> {
+  const sum = (period: DateRange): PipelineStage.FacetPipelineStage[] => [
+    { $match: { [dateField]: { $gte: period.from, $lte: period.to }, ...periodMatch } },
+    { $group: { _id: null, total: { $sum: `$${valueField}` } } },
+  ];
+  const [result] = await model.aggregate([
+    { $match: { [dateField]: { $gte: previous.from, $lte: range.to }, ...match } },
+    {
+      $facet: {
+        current: sum(range),
+        previous: sum(previous),
+        ...(seriesOptions
+          ? {
+              series: [
+                {
+                  $match: {
+                    [dateField]: { $gte: range.from, $lte: range.to },
+                    ...periodMatch,
+                  },
+                },
+                {
+                  $group: {
+                    _id: {
+                      $dateTrunc: {
+                        date: `$${dateField}`,
+                        unit: seriesOptions.granularity,
+                        timezone: 'Asia/Kolkata',
+                        startOfWeek: 'monday',
+                      },
+                    },
+                    total: { $sum: `$${valueField}` },
+                    ...(seriesOptions.countTrips ? { trips: { $sum: 1 } } : {}),
+                  },
+                },
+              ] as PipelineStage.FacetPipelineStage[],
+            }
+          : {}),
+        ...additionalFacets,
+      },
+    },
+  ]);
+  return {
+    current: round(result?.current?.[0]?.total ?? 0),
+    previous: round(result?.previous?.[0]?.total ?? 0),
+    ...(result?.estimatedCurrent ? { estimatedCurrent: round(result.estimatedCurrent[0]?.total ?? 0) } : {}),
+    ...(result?.estimatedPrevious ? { estimatedPrevious: round(result.estimatedPrevious[0]?.total ?? 0) } : {}),
+    ...(result?.series ? { series: result.series } : {}),
+  };
+}
+
+function mergePeriodSeries(
+  range: DateRange,
+  unit: Granularity,
+  revenue: PeriodSeriesPoint[],
+  fuel: PeriodSeriesPoint[],
+  maintenance: PeriodSeriesPoint[],
+  expenses: PeriodSeriesPoint[],
+  transportation: PeriodSeriesPoint[],
+) {
+  const keyed = (rows: PeriodSeriesPoint[]) =>
+    new Map(rows.map((row) => [new Date(row._id).toISOString(), row]));
+  const revenueBy = keyed(revenue);
+  const fuelBy = keyed(fuel);
+  const maintenanceBy = keyed(maintenance);
+  const expensesBy = keyed(expenses);
+  const transportationBy = keyed(transportation);
+
+  return enumerateBuckets(range, unit).map((date) => {
+    const key = date.toISOString();
+    const revenueRow = revenueBy.get(key);
+    const revenueTotal = round(revenueRow?.total ?? 0);
+    const fuelTotal = round(fuelBy.get(key)?.total ?? 0);
+    const maintenanceTotal = round(maintenanceBy.get(key)?.total ?? 0);
+    const expenseTotal = round(expensesBy.get(key)?.total ?? 0);
+    const transportationTotal = round(transportationBy.get(key)?.total ?? 0);
+    const totalExpenses = round(fuelTotal + maintenanceTotal + expenseTotal + transportationTotal);
+    return {
+      date: key,
+      label: formatBucketLabel(date, unit),
+      revenue: revenueTotal,
+      fuelExpenses: fuelTotal,
+      maintenanceExpenses: maintenanceTotal,
+      driverExpenses: expenseTotal,
+      transportationCosts: transportationTotal,
+      expenses: totalExpenses,
+      profit: round(revenueTotal - totalExpenses),
+      trips: revenueRow?.trips ?? 0,
+    };
+  });
+}
+
+function financialSummary(
+  values: { revenue: number; fuel: number; maintenance: number; driverExpenses: number; transportation: number },
+  estimatedMaintenance = 0,
+) {
+  const totalExpenses = round(values.fuel + values.maintenance + values.driverExpenses + values.transportation);
+  return {
+    revenue: values.revenue,
+    fuelExpenses: values.fuel,
+    maintenanceExpenses: values.maintenance,
+    estimatedMaintenanceExpenses: estimatedMaintenance,
+    driverExpenses: values.driverExpenses,
+    transportationCosts: values.transportation,
+    totalExpenses,
+    profit: round(values.revenue - totalExpenses),
+    margin: values.revenue > 0 ? round(((values.revenue - totalExpenses) / values.revenue) * 100) : 0,
   };
 }
 
@@ -140,15 +358,14 @@ export async function buildDashboard(user: UserDocument, range: DateRange) {
     fleet,
     driverCounts,
     tripCounts,
+    overdueStarts,
     tripsInRange,
     previousTrips,
-    financials,
-    previousFinancials,
+    financialPeriods,
     pendingExpenses,
     openBreakdowns,
     expiringDocuments,
     recentTrips,
-    revenueSeries,
   ] = await Promise.all([
     Truck.aggregate<{ _id: string; count: number }>([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
     User.aggregate<{ _id: string; count: number }>([
@@ -156,10 +373,13 @@ export async function buildDashboard(user: UserDocument, range: DateRange) {
       { $group: { _id: '$status', count: { $sum: 1 } } },
     ]),
     Trip.aggregate<{ _id: string; count: number }>([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
+    Trip.countDocuments({
+      status: { $in: ['PLANNED', 'ASSIGNED', 'LOADING'] },
+      startDate: { $lt: resolveRange('today').from },
+    }),
     Trip.countDocuments({ startDate: { $gte: range.from, $lte: range.to } }),
     Trip.countDocuments({ startDate: { $gte: previous.from, $lte: previous.to } }),
-    financialsFor(range),
-    financialsFor(previous),
+    financialsForPeriods(range, previous, pickGranularity(range)),
     DriverExpense.aggregate<{ count: number; amount: number }>([
       { $match: { status: 'PENDING' } },
       { $group: { _id: null, count: { $sum: 1 }, amount: { $sum: '$amount' } } },
@@ -174,13 +394,13 @@ export async function buildDashboard(user: UserDocument, range: DateRange) {
       .limit(6)
       .populate('truck', 'truckNumber')
       .populate('driver', 'name avatarColor'),
-    // A compact 12-point series that feeds the sparklines on the KPI cards.
-    timeSeries(range, pickGranularity(range)),
   ]);
 
   const byTruckStatus = countsToMap(fleet);
   const byDriverStatus = countsToMap(driverCounts);
   const byTripStatus = countsToMap(tripCounts);
+  const financials = financialPeriods.current;
+  const previousFinancials = financialPeriods.previous;
 
   return {
     range,
@@ -197,6 +417,7 @@ export async function buildDashboard(user: UserDocument, range: DateRange) {
       plannedTrips: byTripStatus.PLANNED ?? 0,
       completedTrips: byTripStatus.COMPLETED ?? 0,
       cancelledTrips: byTripStatus.CANCELLED ?? 0,
+      overdueStarts,
       tripsInRange,
       ...financials,
       pendingExpenseCount: pendingExpenses[0]?.count ?? 0,
@@ -212,7 +433,7 @@ export async function buildDashboard(user: UserDocument, range: DateRange) {
     },
     fleetStatus: Object.entries(byTruckStatus).map(([status, count]) => ({ status, count })),
     tripStatus: Object.entries(byTripStatus).map(([status, count]) => ({ status, count })),
-    series: revenueSeries,
+    series: financialPeriods.series ?? [],
     recentTrips: recentTrips.map((trip) => trip.toJSON()),
   };
 }
@@ -279,19 +500,19 @@ export async function timeSeries(range: DateRange, granularity: Granularity, dri
   const driverMatch = driverId ? { driver: new Types.ObjectId(driverId) } : {};
 
   const bucket = (dateField: string) => ({
-    $dateTrunc: { date: `$${dateField}`, unit, startOfWeek: 'monday' },
+    $dateTrunc: { date: `$${dateField}`, unit, timezone: 'Asia/Kolkata', startOfWeek: 'monday' },
   });
 
   const [trips, fuel, maintenance, expenses, transport] = await Promise.all([
     Trip.aggregate<{ _id: Date; revenue: number; trips: number }>([
       {
         $match: {
-          startDate: { $gte: range.from, $lte: range.to },
-          status: { $ne: 'CANCELLED' },
+          completedAt: { $gte: range.from, $lte: range.to },
+          status: 'COMPLETED',
           ...driverMatch,
         },
       },
-      { $group: { _id: bucket('startDate'), revenue: { $sum: '$revenue' }, trips: { $sum: 1 } } },
+      { $group: { _id: bucket('completedAt'), revenue: { $sum: '$revenue' }, trips: { $sum: 1 } } },
     ]),
     FuelRecord.aggregate<{ _id: Date; total: number }>([
       { $match: { date: { $gte: range.from, $lte: range.to }, ...driverMatch } },
@@ -300,7 +521,7 @@ export async function timeSeries(range: DateRange, granularity: Granularity, dri
     driverId
       ? Promise.resolve([] as { _id: Date; total: number }[])
       : Maintenance.aggregate<{ _id: Date; total: number }>([
-          { $match: { date: { $gte: range.from, $lte: range.to } } },
+          { $match: { date: { $gte: range.from, $lte: range.to }, status: 'COMPLETED' } },
           { $group: { _id: bucket('date'), total: { $sum: '$cost' } } },
         ]),
     DriverExpense.aggregate<{ _id: Date; total: number }>([
@@ -352,7 +573,7 @@ export async function timeSeries(range: DateRange, granularity: Granularity, dri
 
 /** Leaderboards shown on the reports page. */
 export async function buildLeaderboards(range: DateRange) {
-  const match = { startDate: { $gte: range.from, $lte: range.to }, status: { $ne: 'CANCELLED' } };
+  const match = { completedAt: { $gte: range.from, $lte: range.to }, status: 'COMPLETED' };
 
   const [topDrivers, topTrucks, topRoutes, expensesByType] = await Promise.all([
     Trip.aggregate([
@@ -430,28 +651,28 @@ function enumerateBuckets(range: DateRange, unit: Granularity): Date[] {
 
   while (cursor.getTime() <= end && buckets.length < 400) {
     buckets.push(new Date(cursor));
-    if (unit === 'day') cursor.setDate(cursor.getDate() + 1);
-    else if (unit === 'week') cursor.setDate(cursor.getDate() + 7);
-    else cursor.setMonth(cursor.getMonth() + 1);
+    if (unit === 'day') cursor.setUTCDate(cursor.getUTCDate() + 1);
+    else if (unit === 'week') cursor.setUTCDate(cursor.getUTCDate() + 7);
+    else cursor.setUTCMonth(cursor.getUTCMonth() + 1);
   }
   return buckets;
 }
 
-/** Mirrors MongoDB's `$dateTrunc`, which works in UTC. */
+/** Mirrors MongoDB's `$dateTrunc` configured for Asia/Kolkata. */
 function truncate(date: Date, unit: Granularity): Date {
-  if (unit === 'month') return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
-  const day = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
-  if (unit === 'day') return day;
+  const parts = indiaParts(date);
+  if (unit === 'month') return indiaDateUtc(parts.year, parts.month, 1);
+  if (unit === 'day') return indiaDateUtc(parts.year, parts.month, parts.day);
+  const day = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
   const weekday = (day.getUTCDay() + 6) % 7;
-  day.setUTCDate(day.getUTCDate() - weekday);
-  return day;
+  return indiaDateUtc(parts.year, parts.month, parts.day - weekday);
 }
 
 function formatBucketLabel(date: Date, unit: Granularity): string {
   if (unit === 'month') {
-    return date.toLocaleDateString('en-US', { month: 'short', year: '2-digit', timeZone: 'UTC' });
+    return date.toLocaleDateString('en-US', { month: 'short', year: '2-digit', timeZone: 'Asia/Kolkata' });
   }
-  return date.toLocaleDateString('en-US', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+  return date.toLocaleDateString('en-US', { day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata' });
 }
 
 function countsToMap(rows: { _id: string; count: number }[]): Record<string, number> {

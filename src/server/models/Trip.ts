@@ -8,6 +8,22 @@ export interface TripStatusEvent {
   note?: string;
 }
 
+export interface TripOdometerReading {
+  event: 'START' | 'CLOSE';
+  valueKm: number;
+  recordedAt: Date;
+  recordedBy: Types.ObjectId;
+}
+
+export interface TripOdometerCorrection {
+  event: 'START' | 'CLOSE';
+  previousKm: number;
+  correctedKm: number;
+  reason: string;
+  correctedAt: Date;
+  correctedBy: Types.ObjectId;
+}
+
 export interface TripDocument extends Document {
   _id: Types.ObjectId;
   tripCode: string;
@@ -20,6 +36,8 @@ export interface TripDocument extends Document {
   startDate: Date;
   expectedDeliveryDate: Date;
   actualDeliveryDate?: Date | null;
+  odometerReadings: TripOdometerReading[];
+  odometerCorrections: TripOdometerCorrection[];
   status: TripStatus;
   revenue: number;
   /** Rolled up from TransportationCost documents. */
@@ -39,6 +57,7 @@ export interface TripDocument extends Document {
   /** virtuals */
   totalExpenses: number;
   profit: number;
+  startOverdue: boolean;
 }
 
 const statusEventSchema = new Schema<TripStatusEvent>(
@@ -47,6 +66,28 @@ const statusEventSchema = new Schema<TripStatusEvent>(
     at: { type: Date, required: true, default: () => new Date() },
     by: { type: Schema.Types.ObjectId, ref: 'User', default: null },
     note: { type: String, trim: true },
+  },
+  { _id: false },
+);
+
+const odometerReadingSchema = new Schema<TripOdometerReading>(
+  {
+    event: { type: String, enum: ['START', 'CLOSE'], required: true },
+    valueKm: { type: Number, required: true, min: 0 },
+    recordedAt: { type: Date, required: true },
+    recordedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+  },
+  { _id: false },
+);
+
+const odometerCorrectionSchema = new Schema<TripOdometerCorrection>(
+  {
+    event: { type: String, enum: ['START', 'CLOSE'], required: true },
+    previousKm: { type: Number, required: true, min: 0 },
+    correctedKm: { type: Number, required: true, min: 0 },
+    reason: { type: String, required: true, trim: true, maxlength: 500 },
+    correctedAt: { type: Date, required: true, default: () => new Date() },
+    correctedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   },
   { _id: false },
 );
@@ -63,6 +104,8 @@ const tripSchema = new Schema<TripDocument>(
     startDate: { type: Date, required: true, index: true },
     expectedDeliveryDate: { type: Date, required: true },
     actualDeliveryDate: { type: Date, default: null },
+    odometerReadings: { type: [odometerReadingSchema], default: [] },
+    odometerCorrections: { type: [odometerCorrectionSchema], default: [] },
     status: { type: String, enum: TRIP_STATUSES, default: 'PLANNED', index: true },
     revenue: { type: Number, default: 0, min: 0 },
     transportationCost: { type: Number, default: 0, min: 0 },
@@ -77,6 +120,7 @@ const tripSchema = new Schema<TripDocument>(
   },
   {
     timestamps: true,
+    optimisticConcurrency: true,
     toJSON: { virtuals: true, transform: (_d, ret: Record<string, unknown>) => (delete ret.__v, ret) },
     toObject: { virtuals: true },
   },
@@ -90,9 +134,26 @@ tripSchema.virtual('profit').get(function (this: TripDocument) {
   return (this.revenue ?? 0) - ((this.transportationCost ?? 0) + (this.driverExpenseTotal ?? 0) + (this.fuelCost ?? 0));
 });
 
+tripSchema.virtual('startOverdue').get(function (this: TripDocument) {
+  if (!['PLANNED', 'ASSIGNED', 'LOADING'].includes(this.status)) return false;
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+  const startDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(this.startDate);
+  return startDate < today;
+});
+
 tripSchema.index({ status: 1, startDate: -1 });
 tripSchema.index({ driver: 1, status: 1, createdAt: -1 });
 tripSchema.index({ truck: 1, status: 1 });
+tripSchema.index({ truck: 1, status: 1, startDate: 1, expectedDeliveryDate: 1 });
+tripSchema.index({ driver: 1, status: 1, startDate: 1, expectedDeliveryDate: 1 });
+tripSchema.index(
+  { status: 1, completedAt: 1 },
+  { partialFilterExpression: { status: 'COMPLETED' } },
+);
+tripSchema.index(
+  { driver: 1, status: 1, completedAt: 1 },
+  { partialFilterExpression: { status: 'COMPLETED' } },
+);
 tripSchema.index({ createdAt: -1 });
 
 export const Trip: Model<TripDocument> =

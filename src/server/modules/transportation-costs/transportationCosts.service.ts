@@ -86,10 +86,24 @@ export async function updateTransportationCost(id: string, input: z.infer<typeof
   const record = await TransportationCost.findById(id);
   if (!record) throw ApiError.notFound('That cost entry could not be found');
 
+  const previousTrip = String(record.trip);
+  const targetTripId = input.trip ?? previousTrip;
+  let targetTruck = record.truck;
+  if (targetTripId !== previousTrip) {
+    const trip = await Trip.findById(targetTripId).select('tripCode truck status');
+    if (!trip) throw ApiError.badRequest('The selected trip could not be found');
+    if (trip.status === 'CANCELLED') throw ApiError.conflict('Costs cannot be moved to a cancelled trip');
+    targetTruck = trip.truck ?? null;
+  }
+
   Object.assign(record, input);
+  if (input.trip !== undefined) {
+    record.trip = input.trip as never;
+    record.truck = targetTruck;
+  }
   if (input.date) record.date = new Date(input.date);
   await record.save();
-  await recalculateTripFinancials(String(record.trip));
+  for (const tripId of new Set([previousTrip, String(record.trip)])) await recalculateTripFinancials(tripId);
 
   await recordAudit({
     ctx,

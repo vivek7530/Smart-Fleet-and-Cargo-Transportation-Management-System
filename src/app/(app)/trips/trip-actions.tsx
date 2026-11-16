@@ -108,10 +108,13 @@ export function StartTripDialog({
         <span className="font-medium text-foreground">{trip.truck?.truckNumber ?? 'the truck'}</span> on the road.
       </div>
 
-      <FormField label="Odometer reading (km)" htmlFor="start-odometer" hint="Optional — keeps the truck's mileage accurate.">
+        <FormField label="Starting odometer (km)" htmlFor="start-odometer" required hint="Must be at least the truck's latest verified reading.">
         <Input
           id="start-odometer"
           type="number"
+          min={trip.truck?.odometerKm ?? 0}
+          step="0.1"
+          required
           value={odometer}
           onChange={(event) => setOdometer(event.target.value)}
           placeholder="e.g. 148230"
@@ -202,10 +205,13 @@ export function CompleteTripDialog({
         />
       </FormField>
 
-      <FormField label="Closing odometer (km)" htmlFor="complete-odometer">
+      <FormField label="Closing odometer (km)" htmlFor="complete-odometer" required hint="Must be at least the starting reading and latest verified truck reading.">
         <Input
           id="complete-odometer"
           type="number"
+          min={Math.max(trip.truck?.odometerKm ?? 0, trip.odometerReadings?.find((reading) => reading.event === 'START')?.valueKm ?? 0)}
+          step="0.1"
+          required
           value={odometer}
           onChange={(event) => setOdometer(event.target.value)}
         />

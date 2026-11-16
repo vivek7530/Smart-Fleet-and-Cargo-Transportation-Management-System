@@ -1,4 +1,5 @@
 import path from 'node:path';
+import dotenv from 'dotenv';
 
 /**
  * Server-side configuration.
@@ -8,11 +9,8 @@ import path from 'node:path';
  * the same file without any extra wiring.
  */
 if (!process.env.MONGODB_URI) {
-  // Imported lazily so it never ends up in a client bundle.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  require('dotenv').config({ path: path.resolve(process.cwd(), '.env.local') });
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  require('dotenv').config();
+  dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
+  dotenv.config();
 }
 
 function num(key: string, fallback: number): number {

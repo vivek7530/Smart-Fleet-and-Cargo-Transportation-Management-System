@@ -35,7 +35,7 @@ const truckSchema = z.object({
   fuelType: z.enum(FUEL_TYPES),
   status: z.enum(TRUCK_STATUSES),
   assignedDriver: z.string().optional(),
-  odometerKm: z.coerce.number().min(0, 'Odometer cannot be negative').optional(),
+  odometerKm: z.coerce.number().min(0, 'Odometer cannot be negative').multipleOf(0.1).optional(),
   mileageKmPerLitre: z.union([z.literal(''), z.coerce.number().min(0).max(100)]).optional(),
   insuranceProvider: z.string().trim().max(120).optional(),
   insurancePolicyNumber: z.string().trim().max(60).optional(),
@@ -285,8 +285,8 @@ export function TruckFormDialog({
             </Select>
           </FormField>
 
-          <FormField label="Odometer (km)" htmlFor="odometerKm" error={errors.odometerKm?.message}>
-            <Input id="odometerKm" type="number" {...form.register('odometerKm')} />
+          <FormField label="Initial odometer (km)" htmlFor="odometerKm" error={errors.odometerKm?.message} hint={isEdit ? 'Updated by trip, fuel, and service readings. Use the audited correction workflow to correct it.' : 'Starting verified truck reading.'}>
+            <Input id="odometerKm" type="number" min="0" step="0.1" disabled={isEdit} {...form.register('odometerKm')} />
           </FormField>
 
           <FormField label="Mileage (km/L)" htmlFor="mileageKmPerLitre">

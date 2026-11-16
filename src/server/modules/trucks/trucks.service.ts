@@ -6,6 +6,7 @@ import { User } from '../../models/User';
 import { Maintenance } from '../../models/Maintenance';
 import { FuelRecord } from '../../models/FuelRecord';
 import { DocumentRecord } from '../../models/DocumentRecord';
+import { BreakdownReport } from '../../models/BreakdownReport';
 import { ApiError } from '../../lib/ApiError';
 import {
   mergeFilters,
@@ -77,11 +78,11 @@ async function truckTotals(truckId: string) {
   const [trips, maintenance, fuel] = await Promise.all([
     Trip.aggregate<{ _id: null; count: number; revenue: number }>([
       { $match: { truck: truckObjectId } },
-      { $group: { _id: null, count: { $sum: 1 }, revenue: { $sum: '$revenue' } } },
+      { $group: { _id: null, count: { $sum: 1 }, revenue: { $sum: { $cond: [{ $eq: ['$status', 'COMPLETED'] }, '$revenue', 0] } } } },
     ]),
     Maintenance.aggregate<{ _id: null; cost: number; count: number }>([
       { $match: { truck: truckObjectId } },
-      { $group: { _id: null, cost: { $sum: '$cost' }, count: { $sum: 1 } } },
+      { $group: { _id: null, cost: { $sum: { $cond: [{ $eq: ['$status', 'COMPLETED'] }, '$cost', 0] } }, count: { $sum: 1 } } },
     ]),
     FuelRecord.aggregate<{ _id: null; cost: number; litres: number }>([
       { $match: { truck: truckObjectId } },
@@ -117,7 +118,7 @@ export async function createTruck(input: CreateTruckInput, ctx: Ctx) {
     summary: `${actor.name} added truck ${truck.truckNumber}`,
     entity: 'Truck',
     entityId: truck._id,
-    metadata: { registrationNumber: truck.registrationNumber },
+    metadata: { registrationNumber: truck.registrationNumber, initialOdometerKm: truck.odometerKm },
   });
 
   return truck;
@@ -130,6 +131,14 @@ export async function updateTruck(id: string, input: UpdateTruckInput, ctx: Ctx)
 
   if (input.assignedDriver && input.assignedDriver !== String(truck.assignedDriver)) {
     await assertDriverAssignable(input.assignedDriver);
+  }
+
+  if (input.assignedDriver !== undefined && input.assignedDriver !== String(truck.assignedDriver ?? '') && truck.status === 'IN_TRIP') {
+    throw ApiError.conflict('The assigned driver cannot be changed while this truck is on a trip');
+  }
+  if (input.assignedDriver !== undefined && input.assignedDriver !== String(truck.assignedDriver ?? '')) {
+    const tripInProgress = await Trip.exists({ truck: truck._id, status: { $in: ['LOADING', 'IN_TRANSIT'] } });
+    if (tripInProgress) throw ApiError.conflict('The assigned driver cannot be changed while this truck has a trip in progress');
   }
 
   // A truck in transit must not be quietly retired underneath a live trip.
@@ -169,6 +178,14 @@ export async function assignDriver(id: string, driverId: string | null, ctx: Ctx
   const actor = ctx.user;
   const truck = await Truck.findById(id);
   if (!truck) throw ApiError.notFound('That truck could not be found');
+
+  if (driverId !== String(truck.assignedDriver ?? '') && truck.status === 'IN_TRIP') {
+    throw ApiError.conflict('The assigned driver cannot be changed while this truck is on a trip');
+  }
+  if (driverId !== String(truck.assignedDriver ?? '')) {
+    const tripInProgress = await Trip.exists({ truck: truck._id, status: { $in: ['LOADING', 'IN_TRANSIT'] } });
+    if (tripInProgress) throw ApiError.conflict('The assigned driver cannot be changed while this truck has a trip in progress');
+  }
 
   if (driverId) {
     const driver = await assertDriverAssignable(driverId);
@@ -225,6 +242,17 @@ export async function deleteTruck(id: string, ctx: Ctx) {
     throw ApiError.conflict(
       `Truck ${truck.truckNumber} is used by ${activeTrips} open trip${activeTrips > 1 ? 's' : ''}. Close them first.`,
     );
+  }
+
+  const [tripHistory, maintenanceHistory, fuelHistory, documentHistory, breakdownHistory] = await Promise.all([
+    Trip.exists({ truck: truck._id }),
+    Maintenance.exists({ truck: truck._id }),
+    FuelRecord.exists({ truck: truck._id }),
+    DocumentRecord.exists({ truck: truck._id }),
+    BreakdownReport.exists({ truck: truck._id }),
+  ]);
+  if (tripHistory || maintenanceHistory || fuelHistory || documentHistory || breakdownHistory) {
+    throw ApiError.conflict(`Truck ${truck.truckNumber} has operational history. Mark it inactive instead of deleting it.`);
   }
 
   await Truck.deleteOne({ _id: truck._id });

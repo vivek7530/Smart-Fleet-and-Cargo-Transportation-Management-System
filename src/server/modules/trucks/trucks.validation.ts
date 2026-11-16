@@ -19,7 +19,7 @@ export const createTruckSchema = z.object({
   fuelType: z.enum(FUEL_TYPES).default('DIESEL'),
   status: z.enum(TRUCK_STATUSES).default('AVAILABLE'),
   assignedDriver: objectId.nullable().optional(),
-  odometerKm: z.coerce.number().min(0).default(0),
+  odometerKm: z.coerce.number().finite().min(0).multipleOf(0.1).default(0),
   mileageKmPerLitre: z.coerce.number().min(0).max(100).optional(),
   insuranceProvider: z.string().trim().max(120).optional(),
   insurancePolicyNumber: z.string().trim().max(60).optional(),
@@ -33,7 +33,9 @@ export const createTruckSchema = z.object({
   notes: z.string().trim().max(2000).optional(),
 });
 
-export const updateTruckSchema = createTruckSchema.partial();
+// The current reading is advanced by operational events; arbitrary patches would
+// bypass monotonic validation and the correction audit trail.
+export const updateTruckSchema = createTruckSchema.omit({ odometerKm: true }).partial();
 
 export const listTrucksQuerySchema = listQuerySchema.extend({
   status: z.enum(TRUCK_STATUSES).optional(),

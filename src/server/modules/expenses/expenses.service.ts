@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { DriverExpense } from '../../models/DriverExpense';
 import { Trip } from '../../models/Trip';
 import { Truck } from '../../models/Truck';
+import { User } from '../../models/User';
 import { ApiError } from '../../lib/ApiError';
 import {
   dateRangeFilter,
@@ -111,6 +112,9 @@ export async function createExpense(input: z.infer<typeof createExpenseSchema>, 
   if (!isDriver && !input.driver) {
     throw ApiError.badRequest('Choose the driver this expense belongs to');
   }
+  const driver = await User.findOne({ _id: driverId, role: 'DRIVER' }).select('status');
+  if (!driver) throw ApiError.badRequest('The selected driver could not be found');
+  if (driver.status !== 'ACTIVE') throw ApiError.conflict('Expenses can only be submitted for active drivers');
 
   let truckId: unknown = null;
   if (input.trip) {
@@ -121,6 +125,9 @@ export async function createExpense(input: z.infer<typeof createExpenseSchema>, 
     }
     if (['COMPLETED', 'CANCELLED'].includes(trip.status)) {
       throw ApiError.conflict(`Trip ${trip.tripCode} is already ${trip.status.toLowerCase()}`);
+    }
+    if (String(trip.driver) !== String(driverId)) {
+      throw ApiError.validation('The selected trip is not assigned to this driver');
     }
     truckId = trip.truck;
   } else {
@@ -170,18 +177,31 @@ export async function updateExpense(id: string, input: z.infer<typeof updateExpe
     if (String(expense.driver) !== String(ctx.user._id)) {
       throw ApiError.forbidden('That expense does not belong to you');
     }
-    // Once a manager has ruled on it, the driver can no longer alter the claim.
-    if (expense.status !== 'PENDING') {
-      throw ApiError.conflict(
-        `This expense has already been ${expense.status.toLowerCase()} and can no longer be edited`,
-      );
+  }
+
+  if (expense.status !== 'PENDING') {
+    throw ApiError.conflict('Reviewed expenses cannot be edited; submit a new claim or use an audited correction');
+  }
+
+  const previousTrip = expense.trip ? String(expense.trip) : null;
+  const targetTripId = input.trip === undefined ? previousTrip : input.trip;
+  if (targetTripId) {
+    const targetTrip = await Trip.findById(targetTripId).select('driver tripCode status');
+    if (!targetTrip) throw ApiError.badRequest('The selected trip could not be found');
+    if (['COMPLETED', 'CANCELLED'].includes(targetTrip.status)) {
+      throw ApiError.conflict(`Trip ${targetTrip.tripCode} is already ${targetTrip.status.toLowerCase()}`);
+    }
+    if (String(targetTrip.driver) !== String(expense.driver)) {
+      throw ApiError.validation('The selected trip is not assigned to this driver');
     }
   }
 
   Object.assign(expense, input);
   if (input.date) expense.date = new Date(input.date);
   await expense.save();
-  if (expense.trip) await recalculateTripFinancials(String(expense.trip));
+  for (const tripId of new Set([previousTrip, expense.trip ? String(expense.trip) : null].filter(Boolean))) {
+    await recalculateTripFinancials(tripId as string);
+  }
 
   await recordAudit({
     ctx,
@@ -201,17 +221,23 @@ export async function reviewExpense(
   reason: string | undefined,
   ctx: Ctx,
 ) {
-  const expense = await DriverExpense.findById(id).populate('driver', 'name');
-  if (!expense) throw ApiError.notFound('That expense could not be found');
-  if (expense.status !== 'PENDING') {
-    throw ApiError.conflict(`This expense has already been ${expense.status.toLowerCase()}`);
+  const expense = await DriverExpense.findOneAndUpdate(
+    { _id: id, status: 'PENDING' },
+    {
+      $set: {
+        status,
+        reviewedBy: ctx.user._id,
+        reviewedAt: new Date(),
+        rejectionReason: status === 'REJECTED' ? reason : undefined,
+      },
+    },
+    { new: true, runValidators: true },
+  ).populate('driver', 'name');
+  if (!expense) {
+    const exists = await DriverExpense.exists({ _id: id });
+    if (!exists) throw ApiError.notFound('That expense could not be found');
+    throw ApiError.conflict('This expense has already been reviewed');
   }
-
-  expense.status = status;
-  expense.reviewedBy = ctx.user._id;
-  expense.reviewedAt = new Date();
-  expense.rejectionReason = status === 'REJECTED' ? reason : undefined;
-  await expense.save();
 
   // Only approved expenses feed into the trip's cost total.
   if (expense.trip) await recalculateTripFinancials(String(expense.trip));
@@ -250,6 +276,10 @@ export async function reviewExpense(
 export async function deleteExpense(id: string, ctx: Ctx) {
   const expense = await DriverExpense.findById(id);
   if (!expense) throw ApiError.notFound('That expense could not be found');
+
+  if (expense.status !== 'PENDING') {
+    throw ApiError.conflict('Reviewed expenses cannot be deleted; use an audited correction');
+  }
 
   if (ctx.user.role === 'DRIVER') {
     if (String(expense.driver) !== String(ctx.user._id)) {

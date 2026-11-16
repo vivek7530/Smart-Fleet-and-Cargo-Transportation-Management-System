@@ -1,5 +1,10 @@
+import { PHASE_DEVELOPMENT_SERVER } from 'next/constants.js';
+
 /** @type {import('next').NextConfig} */
-const nextConfig = {
+const nextConfig = (phase) => ({
+  // Keep dev output separate so a production build cannot replace chunks used
+  // by a running development server (or leave its manifests half-written).
+  distDir: phase === PHASE_DEVELOPMENT_SERVER ? '.next-dev' : '.next',
   reactStrictMode: true,
 
   // Mongoose ships optional native/dynamic requires that only matter on the
@@ -28,6 +33,6 @@ const nextConfig = {
       },
     ];
   },
-};
+});
 
 export default nextConfig;

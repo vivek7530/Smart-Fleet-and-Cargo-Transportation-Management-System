@@ -1,5 +1,7 @@
 import type { Ctx } from '../../api/context';
 import { Types } from 'mongoose';
+import { historicalTripSchema } from './trips.validation';
+import type { z } from 'zod';
 import { Trip, type TripDocument } from '../../models/Trip';
 import { Truck } from '../../models/Truck';
 import { Cargo } from '../../models/Cargo';
@@ -8,6 +10,8 @@ import { DriverExpense } from '../../models/DriverExpense';
 import { TransportationCost } from '../../models/TransportationCost';
 import { FuelRecord } from '../../models/FuelRecord';
 import { DocumentRecord } from '../../models/DocumentRecord';
+import { Maintenance } from '../../models/Maintenance';
+import { BreakdownReport } from '../../models/BreakdownReport';
 import { nextCode } from '../../models/Counter';
 import { ApiError } from '../../lib/ApiError';
 import {
@@ -21,13 +25,14 @@ import {
 import { recordAudit } from '../../services/audit.service';
 import { notify, usersWithRoles } from '../../services/notification.service';
 import { TRIP_TRANSITIONS, type TripStatus } from '../../types/enums';
+import { advanceTruckOdometer } from '../../services/odometer.service';
 
 const SEARCH_FIELDS = ['tripCode', 'pickupLocation', 'deliveryLocation', 'notes'];
 const SORT_FIELDS = ['createdAt', 'tripCode', 'startDate', 'expectedDeliveryDate', 'status', 'revenue'];
 const ACTIVE_STATUSES: TripStatus[] = ['ASSIGNED', 'LOADING', 'IN_TRANSIT'];
 
 const TRIP_POPULATE = [
-  { path: 'truck', select: 'truckNumber registrationNumber make model status capacityTons' },
+  { path: 'truck', select: 'truckNumber registrationNumber make model status capacityTons odometerKm' },
   { path: 'driver', select: 'name mobile email avatarColor licenseNumber' },
   { path: 'cargo', select: 'cargoCode description weightTons type status origin destination' },
 ];
@@ -103,8 +108,8 @@ export async function createTrip(input: Record<string, never>, ctx: Ctx) {
     notes?: string;
   };
 
-  if (body.truck) await assertTruckUsable(body.truck);
-  if (body.driver) await assertDriverUsable(body.driver);
+  if (body.truck) await assertTruckUsable(body.truck, new Date(body.startDate), new Date(body.expectedDeliveryDate));
+  if (body.driver) await assertDriverUsable(body.driver, new Date(body.startDate), new Date(body.expectedDeliveryDate));
   if (body.cargo?.length) await assertCargoAvailable(body.cargo);
 
   const tripCode = await nextCode('TRP');
@@ -143,6 +148,76 @@ export async function createTrip(input: Record<string, never>, ctx: Ctx) {
   return trip.populate(TRIP_POPULATE);
 }
 
+/** Admin-only entry path for already completed historical operations. */
+export async function createHistoricalTrip(input: z.infer<typeof historicalTripSchema>, ctx: Ctx) {
+  const start = new Date(input.actualStartDate);
+  const end = new Date(input.actualDeliveryDate);
+  const truckId = input.truck ?? null;
+  const driverId = input.driver ?? null;
+
+  if (truckId) {
+    const truck = await Truck.findById(truckId).select('truckNumber');
+    if (!truck) throw ApiError.badRequest('The selected truck could not be found');
+    await assertHistoricalResourceAvailable('truck', truckId, start, end, truck.truckNumber);
+  }
+  if (driverId) {
+    const driver = await User.findOne({ _id: driverId, role: 'DRIVER' }).select('name');
+    if (!driver) throw ApiError.badRequest('The selected driver could not be found');
+    await assertHistoricalResourceAvailable('driver', driverId, start, end, driver.name);
+  }
+  if (input.cargo.length) await assertCargoAvailable(input.cargo);
+
+  const tripCode = await nextCode('TRP');
+  const trip = await Trip.create({
+    tripCode,
+    truck: truckId,
+    driver: driverId,
+    cargo: input.cargo,
+    pickupLocation: input.pickupLocation,
+    deliveryLocation: input.deliveryLocation,
+    distanceKm: input.distanceKm,
+    startDate: start,
+    expectedDeliveryDate: end,
+    actualDeliveryDate: end,
+    startedAt: start,
+    completedAt: end,
+    revenue: input.revenue,
+    notes: input.notes,
+    status: 'COMPLETED',
+    createdBy: ctx.user._id,
+    statusHistory: [
+      { status: 'ASSIGNED', at: start, by: ctx.user._id, note: 'Historical record entered' },
+      { status: 'IN_TRANSIT', at: start, by: ctx.user._id, note: 'Historical record entered' },
+      { status: 'DELIVERED', at: end, by: ctx.user._id, note: 'Historical record entered' },
+      { status: 'COMPLETED', at: end, by: ctx.user._id, note: 'Historical record entered' },
+    ],
+    odometerReadings: [
+      { event: 'START', valueKm: input.startOdometerKm, recordedAt: start, recordedBy: ctx.user._id },
+      { event: 'CLOSE', valueKm: input.closingOdometerKm, recordedAt: end, recordedBy: ctx.user._id },
+    ],
+  });
+
+  if (input.cargo.length) {
+    await Cargo.updateMany({ _id: { $in: input.cargo } }, { trip: trip._id, status: 'DELIVERED' });
+  }
+  if (truckId) {
+    await Truck.updateOne(
+      { _id: truckId, odometerKm: { $lte: input.closingOdometerKm } },
+      { $max: { odometerKm: input.closingOdometerKm } },
+    );
+  }
+
+  await recordAudit({
+    ctx,
+    action: 'HISTORICAL_TRIP_CREATED',
+    summary: `${ctx.user.name} entered completed historical trip ${trip.tripCode}`,
+    entity: 'Trip',
+    entityId: trip._id,
+    metadata: { actualStartDate: start, actualDeliveryDate: end, historicalEntry: true },
+  });
+  return trip.populate(TRIP_POPULATE);
+}
+
 export async function updateTrip(id: string, input: Record<string, unknown>, ctx: Ctx) {
   const actor = ctx.user;
   const trip = await Trip.findById(id);
@@ -151,11 +226,30 @@ export async function updateTrip(id: string, input: Record<string, unknown>, ctx
     throw ApiError.conflict(`Trip ${trip.tripCode} is ${trip.status.toLowerCase()} and can no longer be edited`);
   }
 
+  if (['LOADING', 'IN_TRANSIT', 'DELIVERED'].includes(trip.status)) {
+    const operationalFieldsChanged =
+      (input.truck !== undefined && String(input.truck ?? '') !== String(trip.truck ?? '')) ||
+      (input.driver !== undefined && String(input.driver ?? '') !== String(trip.driver ?? '')) ||
+      input.cargo !== undefined || input.startDate !== undefined || input.expectedDeliveryDate !== undefined;
+    if (operationalFieldsChanged) {
+      throw ApiError.conflict('Truck, driver, cargo, and schedule cannot be changed after loading begins. Cancel and create a replacement trip if reassignment is required.');
+    }
+  }
+
   const previousDriver = trip.driver ? String(trip.driver) : null;
   const previousTruck = trip.truck ? String(trip.truck) : null;
 
-  if (input.truck && input.truck !== previousTruck) await assertTruckUsable(input.truck as string, String(trip._id));
-  if (input.driver && input.driver !== previousDriver) await assertDriverUsable(input.driver as string);
+  const proposedStart = input.startDate ? new Date(input.startDate as string) : trip.startDate;
+  const proposedEnd = input.expectedDeliveryDate ? new Date(input.expectedDeliveryDate as string) : trip.expectedDeliveryDate;
+  if (proposedEnd < proposedStart) throw ApiError.validation('Expected delivery must be on or after the start date');
+  const proposedTruck = input.truck === undefined ? previousTruck : input.truck as string | null;
+  const proposedDriver = input.driver === undefined ? previousDriver : input.driver as string | null;
+  if (proposedTruck && (proposedTruck !== previousTruck || input.startDate || input.expectedDeliveryDate)) {
+    await assertTruckUsable(proposedTruck, proposedStart, proposedEnd, String(trip._id));
+  }
+  if (proposedDriver && (proposedDriver !== previousDriver || input.startDate || input.expectedDeliveryDate)) {
+    await assertDriverUsable(proposedDriver, proposedStart, proposedEnd, String(trip._id));
+  }
 
   if (Array.isArray(input.cargo)) {
     await assertCargoAvailable(input.cargo as string[], String(trip._id));
@@ -212,6 +306,10 @@ export async function changeTripStatus(
   if (!trip) throw ApiError.notFound('That trip could not be found');
   assertCanSeeTrip(trip, actor);
 
+  if (nextStatus === 'IN_TRANSIT') {
+    throw ApiError.conflict('Use the start-trip workflow and record the starting odometer reading');
+  }
+
   // Drivers drive the operational part of the lifecycle but never close the books.
   if (actor.role === 'DRIVER' && !['LOADING', 'IN_TRANSIT', 'DELIVERED'].includes(nextStatus)) {
     throw ApiError.forbidden('Drivers can only update a trip up to delivery');
@@ -222,7 +320,6 @@ export async function changeTripStatus(
   trip.status = nextStatus;
   trip.statusHistory.push({ status: nextStatus, at: new Date(), by: actor._id, note });
 
-  if (nextStatus === 'IN_TRANSIT' && !trip.startedAt) trip.startedAt = new Date();
   if (nextStatus === 'DELIVERED' && !trip.actualDeliveryDate) trip.actualDeliveryDate = new Date();
 
   await trip.save();
@@ -240,7 +337,7 @@ export async function changeTripStatus(
   return trip.populate(TRIP_POPULATE);
 }
 
-export async function startTrip(id: string, body: { note?: string; odometerKm?: number }, ctx: Ctx) {
+export async function startTrip(id: string, body: { note?: string; odometerKm: number }, ctx: Ctx) {
   const actor = ctx.user;
   const trip = await Trip.findById(id);
   if (!trip) throw ApiError.notFound('That trip could not be found');
@@ -253,6 +350,16 @@ export async function startTrip(id: string, body: { note?: string; odometerKm?: 
   if (!['ASSIGNED', 'LOADING'].includes(trip.status)) {
     throw ApiError.conflict(`A trip in "${trip.status}" cannot be started`);
   }
+  const unsafeBreakdown = await BreakdownReport.exists({
+    truck: trip.truck,
+    severity: { $in: ['HIGH', 'CRITICAL'] },
+    status: { $nin: ['RESOLVED', 'CANCELLED'] },
+  });
+  if (unsafeBreakdown) throw ApiError.conflict('Resolve the truck’s high-severity breakdown before starting this trip');
+  if (indiaDateKey(trip.startDate) > indiaDateKey(new Date())) {
+    throw ApiError.conflict('A trip cannot be started before its planned start date');
+  }
+  await recordTripOdometer(trip, 'START', body.odometerKm, actor._id);
 
   trip.status = 'IN_TRANSIT';
   trip.startedAt = new Date();
@@ -264,9 +371,6 @@ export async function startTrip(id: string, body: { note?: string; odometerKm?: 
   });
   await trip.save();
 
-  if (body.odometerKm != null) {
-    await Truck.updateOne({ _id: trip.truck }, { odometerKm: body.odometerKm });
-  }
   await syncSideEffectsForStatus(trip);
 
   await recordAudit({
@@ -296,7 +400,7 @@ export async function startTrip(id: string, body: { note?: string; odometerKm?: 
  */
 export async function completeTrip(
   id: string,
-  body: { actualDeliveryDate?: string; note?: string; odometerKm?: number },
+  body: { actualDeliveryDate?: string; note?: string; odometerKm: number },
   ctx: Ctx,
 ) {
   const actor = ctx.user;
@@ -315,11 +419,18 @@ export async function completeTrip(
     );
   }
 
+  const deliveryDate = body.actualDeliveryDate ? new Date(body.actualDeliveryDate) : (trip.actualDeliveryDate ?? new Date());
+  const deliveryKey = indiaDateKey(deliveryDate);
+  if (trip.startedAt && deliveryKey < indiaDateKey(trip.startedAt)) {
+    throw ApiError.validation('Actual delivery cannot be earlier than the actual trip start');
+  }
+  if (deliveryKey > indiaDateKey(new Date())) {
+    throw ApiError.validation('Actual delivery cannot be in the future');
+  }
+  await recordTripOdometer(trip, 'CLOSE', body.odometerKm, actor._id);
   trip.status = 'COMPLETED';
   trip.completedAt = new Date();
-  trip.actualDeliveryDate = body.actualDeliveryDate
-    ? new Date(body.actualDeliveryDate)
-    : (trip.actualDeliveryDate ?? new Date());
+  trip.actualDeliveryDate = deliveryDate;
   trip.statusHistory.push({
     status: 'COMPLETED',
     at: trip.completedAt,
@@ -329,9 +440,6 @@ export async function completeTrip(
 
   await trip.save();
   await recalculateTripFinancials(String(trip._id));
-  if (body.odometerKm != null && trip.truck) {
-    await Truck.updateOne({ _id: trip.truck }, { odometerKm: body.odometerKm });
-  }
   await syncSideEffectsForStatus(trip);
 
   const settled = await Trip.findById(trip._id).populate(TRIP_POPULATE);
@@ -405,9 +513,18 @@ export async function deleteTrip(id: string, ctx: Ctx) {
     throw ApiError.conflict('Only planned or cancelled trips can be deleted. Cancel the trip first.');
   }
 
+  const [costs, expenses, fuel, documents] = await Promise.all([
+    TransportationCost.exists({ trip: trip._id }),
+    DriverExpense.exists({ trip: trip._id }),
+    FuelRecord.exists({ trip: trip._id }),
+    DocumentRecord.exists({ trip: trip._id }),
+  ]);
+  if (costs || expenses || fuel || documents) {
+    throw ApiError.conflict('This trip has linked financial or compliance records. Keep it in history and cancel it instead of deleting it.');
+  }
+
   await Promise.all([
     Cargo.updateMany({ trip: trip._id }, { trip: null, status: 'PENDING' }),
-    TransportationCost.deleteMany({ trip: trip._id }),
     Trip.deleteOne({ _id: trip._id }),
   ]);
   await releaseTruckIfUnused(trip.truck ? String(trip.truck) : null, String(trip._id));
@@ -460,7 +577,12 @@ async function syncSideEffectsForStatus(trip: TripDocument): Promise<void> {
   const tasks: Promise<unknown>[] = [];
 
   if (trip.truck) {
-    const truckStatus =
+    const unsafeBreakdown = await BreakdownReport.exists({
+      truck: trip.truck,
+      severity: { $in: ['HIGH', 'CRITICAL'] },
+      status: { $nin: ['RESOLVED', 'CANCELLED'] },
+    });
+    const truckStatus = unsafeBreakdown ? 'MAINTENANCE' :
       trip.status === 'IN_TRANSIT' || trip.status === 'LOADING'
         ? 'IN_TRIP'
         : ['COMPLETED', 'CANCELLED', 'DELIVERED'].includes(trip.status)
@@ -470,7 +592,7 @@ async function syncSideEffectsForStatus(trip: TripDocument): Promise<void> {
     tasks.push(
       Truck.updateOne(
         // A truck under maintenance keeps that status — it is the more urgent fact.
-        { _id: trip.truck, status: { $ne: 'MAINTENANCE' } },
+        { _id: trip.truck, status: { $nin: ['MAINTENANCE', 'INACTIVE', 'IN_TRIP'] } },
         { status: truckStatus },
       ),
     );
@@ -493,11 +615,13 @@ async function syncSideEffectsForStatus(trip: TripDocument): Promise<void> {
           ? 'LOADED'
           : ['DELIVERED', 'COMPLETED'].includes(trip.status)
             ? 'DELIVERED'
-            : trip.status === 'CANCELLED'
-              ? 'CANCELLED'
-              : 'ASSIGNED';
+            : 'ASSIGNED';
 
-    tasks.push(Cargo.updateMany({ _id: { $in: trip.cargo } }, { status: cargoStatus, trip: trip._id }));
+    if (trip.status === 'CANCELLED') {
+      tasks.push(Cargo.updateMany({ _id: { $in: trip.cargo }, trip: trip._id }, { status: 'PENDING', trip: null }));
+    } else {
+      tasks.push(Cargo.updateMany({ _id: { $in: trip.cargo } }, { status: cargoStatus, trip: trip._id }));
+    }
   }
 
   await Promise.all(tasks);
@@ -538,29 +662,116 @@ function assertCanSeeTrip(trip: TripDocument, user: UserDocument) {
   }
 }
 
-async function assertTruckUsable(truckId: string, excludeTripId?: string) {
+async function assertTruckUsable(truckId: string, start: Date, end: Date, excludeTripId?: string) {
   const truck = await Truck.findById(truckId);
   if (!truck) throw ApiError.badRequest('The selected truck could not be found');
   if (['MAINTENANCE', 'INACTIVE'].includes(truck.status)) {
     throw ApiError.conflict(`Truck ${truck.truckNumber} is ${truck.status.toLowerCase()} and cannot be dispatched`);
   }
-
-  const conflicting = await Trip.countDocuments({
+  const unsafeBreakdown = await BreakdownReport.exists({
     truck: truckId,
-    status: { $in: ACTIVE_STATUSES },
-    ...(excludeTripId ? { _id: { $ne: excludeTripId } } : {}),
+    severity: { $in: ['HIGH', 'CRITICAL'] },
+    status: { $nin: ['RESOLVED', 'CANCELLED'] },
   });
-  if (conflicting > 0) {
-    throw ApiError.conflict(`Truck ${truck.truckNumber} is already on an active trip`);
-  }
+  if (unsafeBreakdown) throw ApiError.conflict(`Truck ${truck.truckNumber} has an unresolved high-severity breakdown`);
+
+  await assertResourceHasNoTripOverlap('truck', truckId, start, end, excludeTripId, truck.truckNumber);
+  await assertNoMaintenanceOverlap(truckId, start, end, truck.truckNumber);
   return truck;
 }
 
-async function assertDriverUsable(driverId: string) {
+async function assertDriverUsable(driverId: string, start: Date, end: Date, excludeTripId?: string) {
   const driver = await User.findOne({ _id: driverId, role: 'DRIVER' });
   if (!driver) throw ApiError.badRequest('The selected driver could not be found');
   if (driver.status !== 'ACTIVE') throw ApiError.badRequest('Only active drivers can be assigned to a trip');
+  await assertResourceHasNoTripOverlap('driver', driverId, start, end, excludeTripId, driver.name);
   return driver;
+}
+
+async function assertResourceHasNoTripOverlap(
+  field: 'truck' | 'driver', id: string, start: Date, end: Date, excludeTripId: string | undefined, label: string,
+) {
+  const conflict = await Trip.findOne({
+    [field]: id,
+    status: { $in: ['PLANNED', 'ASSIGNED', 'LOADING', 'IN_TRANSIT', 'DELIVERED'] },
+    startDate: { $lte: end },
+    $or: [
+      { $expr: { $gte: [{ $ifNull: ['$actualDeliveryDate', '$expectedDeliveryDate'] }, start] } },
+      {
+        status: 'IN_TRANSIT',
+        $expr: {
+          $lt: [
+            { $dateToString: { date: '$expectedDeliveryDate', format: '%Y-%m-%d', timezone: 'Asia/Kolkata' } },
+            indiaDateKey(new Date()),
+          ],
+        },
+      },
+      {
+        status: { $in: ['PLANNED', 'ASSIGNED', 'LOADING'] },
+        $expr: {
+          $lt: [
+            { $dateToString: { date: '$startDate', format: '%Y-%m-%d', timezone: 'Asia/Kolkata' } },
+            indiaDateKey(new Date()),
+          ],
+        },
+      },
+    ],
+    ...(excludeTripId ? { _id: { $ne: excludeTripId } } : {}),
+  }).select('_id tripCode');
+  if (conflict) throw ApiError.conflict(`${field === 'truck' ? 'Truck' : 'Driver'} ${label} is reserved during this trip window (${conflict.tripCode})`);
+}
+
+async function assertHistoricalResourceAvailable(field: 'truck' | 'driver', id: string, start: Date, end: Date, label: string) {
+  const conflict = await Trip.findOne({
+    [field]: id,
+    status: { $ne: 'CANCELLED' },
+    startDate: { $lte: end },
+    $expr: { $gte: [{ $ifNull: ['$actualDeliveryDate', '$expectedDeliveryDate'] }, start] },
+  }).select('tripCode');
+  if (conflict) {
+    throw ApiError.conflict(`${field === 'truck' ? 'Truck' : 'Driver'} ${label} already has a trip in this historical window (${conflict.tripCode})`);
+  }
+}
+
+async function assertNoMaintenanceOverlap(truckId: string, start: Date, end: Date, truckNumber: string) {
+  const startDay = new Date(start);
+  startDay.setUTCHours(0, 0, 0, 0);
+  const endDay = new Date(end);
+  endDay.setUTCHours(23, 59, 59, 999);
+  const conflict = await Maintenance.findOne({
+    truck: truckId,
+    status: { $in: ['SCHEDULED', 'IN_PROGRESS'] },
+    $or: [
+      { status: 'IN_PROGRESS' },
+      { date: { $gte: startDay, $lte: endDay } },
+    ],
+  }).select('_id');
+  if (conflict) throw ApiError.conflict(`Truck ${truckNumber} has maintenance scheduled during this trip window`);
+}
+
+async function recordTripOdometer(
+  trip: TripDocument, event: 'START' | 'CLOSE', reading: number, actorId: Types.ObjectId,
+) {
+  const prior = trip.odometerReadings.find((item) => item.event === event);
+  if (prior) throw ApiError.conflict(`The ${event === 'START' ? 'starting' : 'closing'} odometer reading is already recorded`);
+  const startingReading = trip.odometerReadings.find((item) => item.event === 'START')?.valueKm;
+  if (event === 'CLOSE' && startingReading === undefined) {
+    throw ApiError.conflict('A starting odometer reading must be recorded before closing the trip');
+  }
+  if (event === 'CLOSE' && startingReading! > reading) {
+    throw ApiError.validation('Closing odometer must be at least the starting odometer');
+  }
+  const truck = trip.truck ? await Truck.findById(trip.truck).select('odometerKm') : null;
+  if (!truck) throw ApiError.conflict('The trip must have a truck before recording odometer readings');
+  if (reading < truck.odometerKm) {
+    throw ApiError.validation(`Odometer reading cannot be below the truck's latest verified reading (${truck.odometerKm} km)`);
+  }
+  await advanceTruckOdometer(String(truck._id), reading);
+  trip.odometerReadings.push({ event, valueKm: reading, recordedAt: new Date(), recordedBy: actorId });
+}
+
+function indiaDateKey(date: Date) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(date);
 }
 
 async function assertCargoAvailable(cargoIds: string[], excludeTripId?: string) {
@@ -569,7 +780,7 @@ async function assertCargoAvailable(cargoIds: string[], excludeTripId?: string) 
   if (items.length !== cargoIds.length) throw ApiError.badRequest('One or more cargo items could not be found');
 
   const taken = items.filter(
-    (item) => item.trip && String(item.trip) !== excludeTripId,
+    (item) => (item.trip && String(item.trip) !== excludeTripId) || (!item.trip && item.status !== 'PENDING'),
   );
   if (taken.length > 0) {
     throw ApiError.conflict(

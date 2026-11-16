@@ -60,6 +60,7 @@ fuelRecordSchema.pre('validate', function (next) {
 fuelRecordSchema.index({ date: -1 });
 fuelRecordSchema.index({ createdAt: -1 });
 fuelRecordSchema.index({ truck: 1, date: -1 });
+fuelRecordSchema.index({ driver: 1, date: -1 });
 
 export const FuelRecord: Model<FuelRecordDocument> =
   (models.FuelRecord as Model<FuelRecordDocument> | undefined) ?? model<FuelRecordDocument>('FuelRecord', fuelRecordSchema);

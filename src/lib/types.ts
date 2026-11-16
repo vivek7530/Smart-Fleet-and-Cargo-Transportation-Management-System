@@ -187,10 +187,17 @@ export interface TripStatusEvent {
   note?: string;
 }
 
+export interface TripOdometerReading {
+  event: 'START' | 'CLOSE';
+  valueKm: number;
+  recordedAt: string;
+  recordedBy: string;
+}
+
 export interface Trip {
   id: string;
   tripCode: string;
-  truck?: Pick<Truck, 'id' | 'truckNumber' | 'registrationNumber' | 'make' | 'model' | 'status'> | null;
+  truck?: Pick<Truck, 'id' | 'truckNumber' | 'registrationNumber' | 'make' | 'model' | 'status' | 'odometerKm'> | null;
   driver?: Pick<UserRecord, 'id' | 'name' | 'mobile' | 'avatarColor'> | null;
   cargo: Cargo[];
   pickupLocation: string;
@@ -199,7 +206,9 @@ export interface Trip {
   startDate: string;
   expectedDeliveryDate: string;
   actualDeliveryDate?: string | null;
+  odometerReadings: TripOdometerReading[];
   status: TripStatus;
+  startOverdue?: boolean;
   revenue: number;
   transportationCost: number;
   driverExpenseTotal: number;
@@ -239,6 +248,15 @@ export interface MaintenanceRecord {
   type: MaintenanceType;
   description: string;
   cost: number;
+  estimatedPartsCost?: number;
+  estimatedLabourCost?: number;
+  estimatedOtherCost?: number;
+  estimatedTax?: number;
+  estimatedCost?: number;
+  actualPartsCost?: number;
+  actualLabourCost?: number;
+  actualOtherCost?: number;
+  actualTax?: number;
   date: string;
   serviceProvider?: string;
   nextServiceDate?: string | null;
@@ -367,10 +385,12 @@ export interface DashboardKpis {
   plannedTrips: number;
   completedTrips: number;
   cancelledTrips: number;
+  overdueStarts: number;
   tripsInRange: number;
   revenue: number;
   fuelExpenses: number;
   maintenanceExpenses: number;
+  estimatedMaintenanceExpenses: number;
   driverExpenses: number;
   transportationCosts: number;
   totalExpenses: number;

@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { Maintenance } from '../../models/Maintenance';
 import { Truck } from '../../models/Truck';
+import { Trip } from '../../models/Trip';
+import { BreakdownReport } from '../../models/BreakdownReport';
 import { ApiError } from '../../lib/ApiError';
 import {
   dateRangeFilter,
@@ -15,16 +17,25 @@ import { notify } from '../../services/notification.service';
 import { MAINTENANCE_STATUSES, MAINTENANCE_TYPES } from '../../types/enums';
 import { dateString, objectId, optionalDateString } from '../shared';
 import type { Ctx } from '../../api/context';
+import { advanceTruckOdometer } from '../../services/odometer.service';
 
 export const createMaintenanceSchema = z.object({
   truck: objectId,
   type: z.enum(MAINTENANCE_TYPES),
   description: z.string().trim().min(3, 'Describe the work carried out').max(2000),
-  cost: z.coerce.number().min(0, 'Cost cannot be negative'),
+  cost: z.coerce.number().finite().min(0, 'Cost cannot be negative').multipleOf(0.01).default(0),
+  estimatedPartsCost: z.coerce.number().min(0).multipleOf(0.01).default(0),
+  estimatedLabourCost: z.coerce.number().min(0).multipleOf(0.01).default(0),
+  estimatedOtherCost: z.coerce.number().min(0).multipleOf(0.01).default(0),
+  estimatedTax: z.coerce.number().min(0).multipleOf(0.01).default(0),
+  actualPartsCost: z.coerce.number().min(0).multipleOf(0.01).default(0),
+  actualLabourCost: z.coerce.number().min(0).multipleOf(0.01).default(0),
+  actualOtherCost: z.coerce.number().min(0).multipleOf(0.01).default(0),
+  actualTax: z.coerce.number().min(0).multipleOf(0.01).default(0),
   date: dateString,
   serviceProvider: z.string().trim().max(160).optional(),
   nextServiceDate: optionalDateString,
-  odometerKm: z.coerce.number().min(0).optional(),
+  odometerKm: z.coerce.number().finite().min(0).multipleOf(0.1).optional(),
   status: z.enum(MAINTENANCE_STATUSES).default('COMPLETED'),
 });
 
@@ -71,25 +82,66 @@ export async function createMaintenance(input: z.infer<typeof createMaintenanceS
   const truck = await Truck.findById(input.truck);
   if (!truck) throw ApiError.badRequest('The selected truck could not be found');
 
+  if (input.status === 'IN_PROGRESS') {
+    const activeTrip = await Trip.exists({
+      truck: truck._id,
+      status: { $in: ['ASSIGNED', 'LOADING', 'IN_TRANSIT'] },
+    });
+    if (activeTrip) throw ApiError.conflict('Maintenance cannot start while the truck has an active trip');
+  }
+  if (input.status === 'SCHEDULED') {
+    const dayStart = new Date(input.date);
+    dayStart.setUTCHours(0, 0, 0, 0);
+    const dayEnd = new Date(dayStart);
+    dayEnd.setUTCHours(23, 59, 59, 999);
+    const overlappingTrip = await Trip.exists({
+      truck: truck._id,
+      status: { $in: ['PLANNED', 'ASSIGNED', 'LOADING', 'IN_TRANSIT', 'DELIVERED'] },
+      startDate: { $lte: dayEnd },
+      $or: [
+        { $expr: { $gte: [{ $ifNull: ['$actualDeliveryDate', '$expectedDeliveryDate'] }, dayStart] } },
+        {
+          status: 'IN_TRANSIT',
+          $expr: {
+            $lt: [
+              { $dateToString: { date: '$expectedDeliveryDate', format: '%Y-%m-%d', timezone: 'Asia/Kolkata' } },
+              new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date()),
+            ],
+          },
+        },
+        {
+          status: { $in: ['PLANNED', 'ASSIGNED', 'LOADING'] },
+          $expr: {
+            $lt: [
+              { $dateToString: { date: '$startDate', format: '%Y-%m-%d', timezone: 'Asia/Kolkata' } },
+              new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date()),
+            ],
+          },
+        },
+      ],
+    });
+    if (overlappingTrip) throw ApiError.conflict('Maintenance cannot be scheduled during a reserved trip window');
+  }
+  if (input.odometerKm != null) {
+    if (input.odometerKm < truck.odometerKm) throw ApiError.validation('Maintenance odometer cannot be below the latest verified truck reading');
+    await advanceTruckOdometer(String(truck._id), input.odometerKm);
+  }
+  const estimatedCost = sumCosts(input.estimatedPartsCost, input.estimatedLabourCost, input.estimatedOtherCost, input.estimatedTax);
+  const actualComponents = sumCosts(input.actualPartsCost, input.actualLabourCost, input.actualOtherCost, input.actualTax);
+  const actualCost = actualComponents > 0 ? actualComponents : input.cost;
+
   const record = await Maintenance.create({
     ...input,
+    cost: input.status === 'COMPLETED' ? actualCost : 0,
+    estimatedCost,
+    approvedBy: input.status === 'COMPLETED' ? ctx.user._id : null,
     date: new Date(input.date),
     nextServiceDate: input.nextServiceDate ? new Date(input.nextServiceDate) : null,
     createdBy: ctx.user._id,
   });
 
   // Scheduled or in-progress work takes the truck off the road.
-  if (record.status === 'IN_PROGRESS' || record.status === 'SCHEDULED') {
-    if (truck.status !== 'IN_TRIP') {
-      truck.status = 'MAINTENANCE';
-      await truck.save();
-    }
-  } else if (truck.status === 'MAINTENANCE') {
-    truck.status = truck.assignedDriver ? 'ASSIGNED' : 'AVAILABLE';
-    await truck.save();
-  }
-
-  if (input.odometerKm != null) await Truck.updateOne({ _id: truck._id }, { odometerKm: input.odometerKm });
+  await syncTruckMaintenanceStatus(String(truck._id));
 
   await recordAudit({
     ctx,
@@ -118,7 +170,43 @@ export async function updateMaintenance(id: string, input: z.infer<typeof update
   const record = await Maintenance.findById(id);
   if (!record) throw ApiError.notFound('That maintenance record could not be found');
 
+  if (input.odometerKm !== undefined && record.odometerKm !== undefined && input.odometerKm !== record.odometerKm) {
+    throw ApiError.conflict('Submitted maintenance odometer readings cannot be edited; use the authorized correction workflow');
+  }
+
+  const previousStatus = record.status;
+  if (previousStatus === 'COMPLETED' && input.status !== undefined && input.status !== 'COMPLETED') {
+    throw ApiError.conflict('Completed maintenance is a historical record and cannot be reopened or cancelled');
+  }
+  const previousTruckId = String(record.truck);
+  const targetTruckId = input.truck ?? previousTruckId;
+  if (input.truck !== undefined && targetTruckId !== previousTruckId && record.odometerKm != null) {
+    throw ApiError.conflict('A maintenance record with a verified odometer cannot be moved to another truck');
+  }
+  const targetTruck = await Truck.findById(targetTruckId).select('odometerKm');
+  if (!targetTruck) throw ApiError.badRequest('The selected truck could not be found');
+  const targetStatus = input.status ?? record.status;
+  const targetDate = input.date ? new Date(input.date) : record.date;
+
+  if (targetStatus === 'IN_PROGRESS') {
+    const activeTrip = await Trip.exists({ truck: targetTruckId, status: { $in: ['ASSIGNED', 'LOADING', 'IN_TRANSIT'] } });
+    if (activeTrip) throw ApiError.conflict('Maintenance cannot start while the truck has an active trip');
+  }
+  if (targetStatus === 'SCHEDULED') {
+    await assertMaintenanceDateAvailable(targetTruckId, targetDate);
+  }
+  if (input.odometerKm !== undefined && record.odometerKm === undefined) {
+    if (input.odometerKm < targetTruck.odometerKm) throw ApiError.validation('Maintenance odometer cannot be below the latest verified truck reading');
+    await advanceTruckOdometer(targetTruckId, input.odometerKm);
+  }
+
   Object.assign(record, input);
+  record.estimatedCost = sumCosts(record.estimatedPartsCost, record.estimatedLabourCost, record.estimatedOtherCost, record.estimatedTax);
+  const actualComponents = sumCosts(record.actualPartsCost, record.actualLabourCost, record.actualOtherCost, record.actualTax);
+  record.cost = record.status === 'COMPLETED'
+    ? (actualComponents > 0 ? actualComponents : input.cost ?? record.cost)
+    : 0;
+  if (previousStatus !== 'COMPLETED' && record.status === 'COMPLETED') record.approvedBy = ctx.user._id;
   if (input.date) record.date = new Date(input.date);
   if (input.nextServiceDate !== undefined) {
     record.nextServiceDate = input.nextServiceDate ? new Date(input.nextServiceDate) : null;
@@ -126,13 +214,8 @@ export async function updateMaintenance(id: string, input: z.infer<typeof update
   await record.save();
 
   // Completing the job hands the truck back to the fleet.
-  if (record.status === 'COMPLETED') {
-    const truck = await Truck.findById(record.truck);
-    if (truck && truck.status === 'MAINTENANCE') {
-      truck.status = truck.assignedDriver ? 'ASSIGNED' : 'AVAILABLE';
-      await truck.save();
-    }
-  }
+  await syncTruckMaintenanceStatus(previousTruckId);
+  if (targetTruckId !== previousTruckId) await syncTruckMaintenanceStatus(targetTruckId);
 
   await recordAudit({
     ctx,
@@ -148,7 +231,11 @@ export async function updateMaintenance(id: string, input: z.infer<typeof update
 export async function deleteMaintenance(id: string, ctx: Ctx) {
   const record = await Maintenance.findById(id);
   if (!record) throw ApiError.notFound('That maintenance record could not be found');
+  if (record.status === 'COMPLETED') {
+    throw ApiError.conflict('Completed maintenance is a historical record and cannot be deleted');
+  }
   await Maintenance.deleteOne({ _id: record._id });
+  await syncTruckMaintenanceStatus(String(record.truck));
 
   await recordAudit({
     ctx,
@@ -163,4 +250,55 @@ export async function deleteMaintenance(id: string, ctx: Ctx) {
 
 function humanise(value: string) {
   return value.toLowerCase().replace(/_/g, ' ');
+}
+
+function sumCosts(...values: number[]) {
+  return Math.round(values.reduce((total, value) => total + (value || 0), 0) * 100) / 100;
+}
+
+async function syncTruckMaintenanceStatus(truckId: string) {
+  const truck = await Truck.findById(truckId);
+  if (!truck) return;
+  const [inProgress, activeTrip, severeBreakdown] = await Promise.all([
+    Maintenance.exists({ truck: truck._id, status: 'IN_PROGRESS' }),
+    Trip.exists({ truck: truck._id, status: { $in: ['ASSIGNED', 'LOADING', 'IN_TRANSIT'] } }),
+    BreakdownReport.exists({ truck: truck._id, severity: { $in: ['HIGH', 'CRITICAL'] }, status: { $nin: ['RESOLVED', 'CANCELLED'] } }),
+  ]);
+  if (inProgress || severeBreakdown) truck.status = 'MAINTENANCE';
+  else if (truck.status === 'MAINTENANCE') truck.status = activeTrip ? 'IN_TRIP' : truck.assignedDriver ? 'ASSIGNED' : 'AVAILABLE';
+  await truck.save();
+}
+
+async function assertMaintenanceDateAvailable(truckId: string, date: Date) {
+  const dayStart = new Date(date);
+  dayStart.setUTCHours(0, 0, 0, 0);
+  const dayEnd = new Date(dayStart);
+  dayEnd.setUTCHours(23, 59, 59, 999);
+  const overlap = await Trip.exists({
+    truck: truckId,
+    status: { $in: ['PLANNED', 'ASSIGNED', 'LOADING', 'IN_TRANSIT', 'DELIVERED'] },
+    startDate: { $lte: dayEnd },
+    $or: [
+      { $expr: { $gte: [{ $ifNull: ['$actualDeliveryDate', '$expectedDeliveryDate'] }, dayStart] } },
+      {
+        status: 'IN_TRANSIT',
+        $expr: {
+          $lt: [
+            { $dateToString: { date: '$expectedDeliveryDate', format: '%Y-%m-%d', timezone: 'Asia/Kolkata' } },
+            new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date()),
+          ],
+        },
+      },
+      {
+        status: { $in: ['PLANNED', 'ASSIGNED', 'LOADING'] },
+        $expr: {
+          $lt: [
+            { $dateToString: { date: '$startDate', format: '%Y-%m-%d', timezone: 'Asia/Kolkata' } },
+            new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date()),
+          ],
+        },
+      },
+    ],
+  });
+  if (overlap) throw ApiError.conflict('Maintenance cannot be scheduled during a reserved trip window');
 }

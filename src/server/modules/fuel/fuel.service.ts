@@ -15,6 +15,7 @@ import { recordAudit } from '../../services/audit.service';
 import { recalculateTripFinancials } from '../trips/trips.service';
 import { dateString, objectId } from '../shared';
 import type { Ctx } from '../../api/context';
+import { advanceTruckOdometer } from '../../services/odometer.service';
 
 const PAYMENT_MODES = ['CASH', 'CARD', 'FUEL_CARD', 'CREDIT', 'UPI'] as const;
 
@@ -24,7 +25,7 @@ export const createFuelSchema = z.object({
   date: dateString,
   litres: z.coerce.number().min(0.1, 'Litres must be greater than zero').max(2000),
   pricePerLitre: z.coerce.number().min(0.1, 'Price per litre is required').max(10000),
-  odometerKm: z.coerce.number().min(0).optional(),
+  odometerKm: z.coerce.number().finite().min(0).multipleOf(0.1).optional(),
   station: z.string().trim().max(160).optional(),
   location: z.string().trim().max(160).optional(),
   paymentMode: z.enum(PAYMENT_MODES).default('FUEL_CARD'),
@@ -72,14 +73,23 @@ export async function listFuel(query: ListQuery, ctx: Ctx) {
 }
 
 export async function createFuelRecord(input: z.infer<typeof createFuelSchema>, ctx: Ctx) {
-  const truck = await Truck.findById(input.truck).select('truckNumber assignedDriver');
+  const truck = await Truck.findById(input.truck).select('truckNumber assignedDriver odometerKm');
   if (!truck) throw ApiError.badRequest('The selected truck could not be found');
 
   // A driver may only log fuel against the truck they are responsible for.
   if (ctx.user.role === 'DRIVER' && String(truck.assignedDriver) !== String(ctx.user._id)) {
     throw ApiError.forbidden('You can only record fuel for the truck assigned to you');
   }
-  if (input.trip) await assertTripAccessible(input.trip, ctx);
+  if (input.trip) {
+    const trip = await assertTripAccessible(input.trip, ctx);
+    if (String(trip.truck) !== String(truck._id)) throw ApiError.validation('The selected trip does not use this truck');
+  }
+  if (input.odometerKm != null) {
+    if (input.odometerKm < truck.odometerKm) {
+      throw ApiError.validation(`Fuel odometer cannot be below the truck's latest verified value (${truck.odometerKm} km)`);
+    }
+    await advanceTruckOdometer(String(truck._id), input.odometerKm);
+  }
 
   const record = await FuelRecord.create({
     ...input,
@@ -89,7 +99,6 @@ export async function createFuelRecord(input: z.infer<typeof createFuelSchema>, 
     createdBy: ctx.user._id,
   });
 
-  if (input.odometerKm != null) await Truck.updateOne({ _id: truck._id }, { odometerKm: input.odometerKm });
   if (record.trip) await recalculateTripFinancials(String(record.trip));
 
   await recordAudit({
@@ -107,8 +116,39 @@ export async function updateFuelRecord(id: string, input: z.infer<typeof updateF
   const record = await FuelRecord.findById(id);
   if (!record) throw ApiError.notFound('That fuel record could not be found');
 
+  const targetTruckId = input.truck ?? String(record.truck);
+  const targetTripId = input.trip === undefined ? (record.trip ? String(record.trip) : null) : input.trip;
+  const targetTruck = await Truck.findById(targetTruckId).select('assignedDriver');
+  if (!targetTruck) throw ApiError.badRequest('The selected truck could not be found');
+  if (targetTripId) {
+    const targetTrip = await Trip.findById(targetTripId).select('truck status tripCode');
+    if (!targetTrip) throw ApiError.badRequest('The selected trip could not be found');
+    if (String(targetTrip.truck) !== String(targetTruck._id)) {
+      throw ApiError.validation('The selected trip does not use this truck');
+    }
+    if (targetTrip.status === 'CANCELLED') throw ApiError.conflict('Fuel cannot be attached to a cancelled trip');
+  }
+  if (input.odometerKm !== undefined && record.odometerKm !== undefined && input.odometerKm !== record.odometerKm) {
+    throw ApiError.conflict('Submitted fuel odometer readings cannot be edited; use the authorized correction workflow');
+  }
+
+  if (input.odometerKm !== undefined && record.odometerKm === undefined) {
+    const truckId = String(input.truck ?? record.truck);
+    const truck = await Truck.findById(truckId).select('odometerKm');
+    if (!truck) throw ApiError.notFound('The truck for this fuel record could not be found');
+    if (input.odometerKm < truck.odometerKm) throw ApiError.validation('Fuel odometer cannot be below the latest verified truck reading');
+    await advanceTruckOdometer(truckId, input.odometerKm);
+  }
+
   const previousTrip = record.trip ? String(record.trip) : null;
+  const previousTruck = String(record.truck);
+  if (input.truck !== undefined && String(input.truck) !== previousTruck && record.odometerKm != null) {
+    throw ApiError.conflict('A fuel entry with a verified odometer cannot be moved to another truck');
+  }
   Object.assign(record, input);
+  if (input.truck !== undefined) record.truck = targetTruck._id;
+  if (input.trip !== undefined) record.trip = input.trip as never;
+  if (input.truck !== undefined && String(input.truck) !== previousTruck) record.driver = targetTruck.assignedDriver ?? null;
   if (input.date) record.date = new Date(input.date);
   await record.save();
 
@@ -148,7 +188,7 @@ export async function deleteFuelRecord(id: string, ctx: Ctx) {
 }
 
 async function assertTripAccessible(tripId: string, ctx: Ctx) {
-  const trip = await Trip.findById(tripId).select('driver status tripCode');
+  const trip = await Trip.findById(tripId).select('driver truck status tripCode');
   if (!trip) throw ApiError.badRequest('The selected trip could not be found');
   if (ctx.user.role === 'DRIVER' && String(trip.driver) !== String(ctx.user._id)) {
     throw ApiError.forbidden('That trip is not assigned to you');

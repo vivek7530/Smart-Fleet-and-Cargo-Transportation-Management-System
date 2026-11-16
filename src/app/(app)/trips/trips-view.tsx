@@ -61,6 +61,7 @@ export function TripsView({ title, description }: { title: string; description: 
           <p className="flex items-center gap-2 font-medium">
             <span className="tabular">{trip.tripCode}</span>
             <StatusBadge status={trip.status} size="sm" />
+            {trip.startOverdue ? <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] font-semibold text-destructive">Start overdue</span> : null}
           </p>
           <p className="mt-0.5 flex items-center gap-1 truncate text-xs text-muted-foreground">
             <MapPin className="size-3 shrink-0" />
@@ -225,6 +226,7 @@ export function TripsView({ title, description }: { title: string; description: 
             <div className="flex items-center gap-2">
               <span className="font-medium tabular">{trip.tripCode}</span>
               <StatusBadge status={trip.status} size="sm" />
+              {trip.startOverdue ? <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] font-semibold text-destructive">Start overdue</span> : null}
             </div>
             <p className="text-xs text-muted-foreground">
               {trip.pickupLocation} → {trip.deliveryLocation}

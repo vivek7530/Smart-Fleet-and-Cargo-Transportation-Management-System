@@ -1,6 +1,7 @@
 import type { AnonCtx, Ctx } from '../../api/context';
 import { User, type UserDocument } from '../../models/User';
 import { ApiError } from '../../lib/ApiError';
+import { assertDriverNameAvailable } from '../../lib/driver-name';
 import { hashPassword, verifyPassword } from '../../lib/password';
 import { isValidMobile, normaliseEmail, normaliseMobile } from '../../lib/contact';
 import { recordAudit } from '../../services/audit.service';
@@ -91,6 +92,8 @@ export async function registerFromInvitation(input: RegisterInput, ctx: AnonCtx)
   }
 
   const lockedField = invitation.channel === 'EMAIL' ? 'email' : 'mobile';
+
+  if (user.role === 'DRIVER') await assertDriverNameAvailable(input.name, String(user._id));
 
   if (lockedField === 'email') {
     // Email came from the invitation and stays exactly as it was issued.
@@ -186,6 +189,9 @@ export async function updateOwnProfile(
   input: UpdateProfileInput,
   ctx: Ctx,
 ): Promise<UserDocument> {
+  if (user.role === 'DRIVER' && input.name) {
+    await assertDriverNameAvailable(input.name, String(user._id));
+  }
   if (input.name) user.name = input.name;
   if (input.designation !== undefined) user.designation = input.designation;
   if (input.address !== undefined) user.address = input.address;

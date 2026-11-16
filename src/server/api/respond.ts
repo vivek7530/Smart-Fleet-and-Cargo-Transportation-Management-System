@@ -51,6 +51,10 @@ export function toErrorResponse(error: unknown): NextResponse {
     status = 400;
     code = 'BAD_REQUEST';
     message = `"${String(error.value)}" is not a valid ${error.path}`;
+  } else if (error instanceof mongoose.Error.VersionError) {
+    status = 409;
+    code = 'CONCURRENT_UPDATE';
+    message = 'This record changed in another request. Reload it and try again.';
   } else if (isDuplicateKeyError(error)) {
     status = 409;
     code = 'DUPLICATE_KEY';

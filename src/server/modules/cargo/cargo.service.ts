@@ -63,7 +63,7 @@ export async function createCargo(input: CreateCargoInput, ctx: Ctx) {
   const cargo = await Cargo.create({
     ...input,
     cargoCode,
-    status: input.trip ? 'ASSIGNED' : input.status,
+    status: input.trip ? 'ASSIGNED' : 'PENDING',
     createdBy: actor._id,
   });
 
@@ -88,6 +88,9 @@ export async function updateCargo(id: string, input: UpdateCargoInput, ctx: Ctx)
   const previousTrip = cargo.trip ? String(cargo.trip) : null;
 
   if (input.trip !== undefined && input.trip !== previousTrip) {
+    if (['LOADED', 'IN_TRANSIT', 'DELIVERED'].includes(cargo.status)) {
+      throw ApiError.conflict('Cargo cannot be reassigned after it has been loaded onto a trip');
+    }
     if (input.trip) await assertTripOpen(input.trip);
     // Keep both sides of the cargo â†” trip link in step.
     if (previousTrip) await Trip.updateOne({ _id: previousTrip }, { $pull: { cargo: cargo._id } });
@@ -97,7 +100,7 @@ export async function updateCargo(id: string, input: UpdateCargoInput, ctx: Ctx)
   Object.assign(cargo, input);
   if (input.trip !== undefined) {
     cargo.trip = (input.trip ?? null) as never;
-    if (!input.status) cargo.status = input.trip ? 'ASSIGNED' : 'PENDING';
+    cargo.status = input.trip ? 'ASSIGNED' : 'PENDING';
   }
 
   await cargo.save();

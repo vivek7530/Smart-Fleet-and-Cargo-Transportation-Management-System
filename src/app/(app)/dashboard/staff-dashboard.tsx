@@ -85,7 +85,7 @@ export function StaffDashboardView({ data }: { data: StaffDashboard; range: Rang
         <Card className="xl:col-span-7">
           <CardHeader>
             <CardTitle>Cost breakdown</CardTitle>
-            <CardDescription>Fuel, maintenance, driver claims and trip costs per period</CardDescription>
+            <CardDescription>Fuel, maintenance, driver claims and trip costs per period · {formatCurrency(kpis.estimatedMaintenanceExpenses)} maintenance estimated</CardDescription>
           </CardHeader>
           <CardContent>
             <ExpenseBreakdownChart data={data.series} height={250} />
@@ -542,6 +542,14 @@ function LiveTrips({ data, className }: { data: StaffDashboard; className?: stri
 function AttentionPanel({ data }: { data: StaffDashboard }) {
   const { kpis } = data;
   const items = [
+    {
+      count: kpis.overdueStarts,
+      label: 'Trips not started on schedule',
+      detail: kpis.overdueStarts ? 'Review and reschedule these trips' : 'No overdue starts',
+      icon: Route,
+      tone: 'bg-warning-soft text-warning',
+      href: '/trips',
+    },
     {
       count: kpis.pendingExpenseCount,
       label: 'Expense claims to review',

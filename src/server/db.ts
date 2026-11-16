@@ -2,8 +2,15 @@ import dns from 'node:dns';
 import mongoose from 'mongoose';
 import { env } from './config/env';
 import { logger } from './lib/logger';
+import { User } from './models/User';
 
-dns.setServers(['8.8.8.8', '1.1.1.1']);
+// The MongoDB driver uses dns.promises internally for SRV lookups, which
+// maintains a separate server list from the callback-based dns API.
+// Set Google DNS on BOTH so SRV resolution works even if the system DNS
+// does not support SRV queries.
+const DNS_SERVERS = ['8.8.8.8', '1.1.1.1'];
+dns.setServers(DNS_SERVERS);
+dns.promises.setServers(DNS_SERVERS);
 
 mongoose.set('strictQuery', true);
 
@@ -49,8 +56,18 @@ export async function connectToDatabase(): Promise<typeof mongoose> {
       });
   }
 
-  cache.conn = await cache.promise;
-  return cache.conn;
+  const connection = await cache.promise;
+  // This invariant must hold in production too, where Mongoose autoIndex is off.
+  await User.collection.createIndex(
+    { nameKey: 1 },
+    {
+      name: 'unique_driver_name_key',
+      unique: true,
+      partialFilterExpression: { role: 'DRIVER', nameKey: { $type: 'string' } },
+    },
+  );
+  cache.conn = connection;
+  return connection;
 }
 
 export async function disconnectFromDatabase(): Promise<void> {
