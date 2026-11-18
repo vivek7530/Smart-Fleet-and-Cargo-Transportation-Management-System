@@ -71,7 +71,7 @@ export default function MyFleetPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="My fleet"
+        title="Trucks"
         description="The trucks you hold, the drivers on your roster and what is on the road right now."
         actions={
           <Button asChild>

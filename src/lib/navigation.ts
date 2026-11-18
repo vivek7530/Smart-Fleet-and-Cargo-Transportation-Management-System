@@ -60,8 +60,11 @@ export const NAV_SECTIONS: NavSection[] = [
       // what is on the road. Two entries for one fleet was a duplicate.
       { label: 'Trucks', href: '/trucks', icon: Truck, roles: ['ADMIN'], description: 'The vehicle fleet' },
       { label: 'My Truck', href: '/my-truck', icon: Truck, roles: ['DRIVER'], description: 'The truck assigned to you' },
+      // A manager's Trucks entry. Same place in the sidebar as an
+      // administrator's, same name — it just also carries their drivers and
+      // what is on the road, because for a manager those are the same fleet.
       {
-        label: 'My Fleet',
+        label: 'Trucks',
         href: '/my-fleet',
         icon: Truck,
         roles: ['MANAGER'],
