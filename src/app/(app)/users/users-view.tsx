@@ -9,6 +9,7 @@ import {
   RotateCcw,
   ShieldCheck,
   Smartphone,
+  Steering,
   Trash2,
   UserCheck,
   UserPlus,
@@ -48,16 +49,115 @@ export function UsersView({
   description,
   fixedRole,
   extraTabs = [],
+  roleTabs = false,
 }: {
   title: string;
   description: string;
   fixedRole?: Extract<Role, 'MANAGER' | 'DRIVER'>;
   extraTabs?: ExtraTab[];
+  /** Splits the people list into one tab per role — used by /users. */
+  roleTabs?: boolean;
+}) {
+  const [inviteOpen, setInviteOpen] = React.useState(false);
+
+  return (
+    <div className="space-y-5">
+      <PageHeader
+        title={title}
+        description={description}
+        actions={
+          <Button onClick={() => setInviteOpen(true)}>
+            <UserPlus />
+            Invite {fixedRole ? fixedRole.toLowerCase() : 'user'}
+          </Button>
+        }
+      />
+
+      <Tabs defaultValue={roleTabs ? 'everyone' : 'people'}>
+        <TabsList>
+          {roleTabs ? (
+            <>
+              <TabsTrigger value="everyone">
+                <UsersIcon />
+                Everyone
+              </TabsTrigger>
+              <TabsTrigger value="managers">
+                <ShieldCheck />
+                Managers
+              </TabsTrigger>
+              <TabsTrigger value="drivers">
+                <Steering />
+                Drivers
+              </TabsTrigger>
+            </>
+          ) : (
+            <TabsTrigger value="people">
+              <UsersIcon />
+              People
+            </TabsTrigger>
+          )}
+          <TabsTrigger value="invitations">
+            <Mail />
+            Invitations
+          </TabsTrigger>
+          {extraTabs.map((tab) => (
+            <TabsTrigger key={tab.value} value={tab.value}>
+              {tab.icon}
+              {tab.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+
+        {roleTabs ? (
+          <>
+            <TabsContent value="everyone" className="mt-4">
+              <PeopleList onInvite={() => setInviteOpen(true)} />
+            </TabsContent>
+            <TabsContent value="managers" className="mt-4">
+              <PeopleList fixedRole="MANAGER" onInvite={() => setInviteOpen(true)} />
+            </TabsContent>
+            <TabsContent value="drivers" className="mt-4">
+              <PeopleList fixedRole="DRIVER" onInvite={() => setInviteOpen(true)} />
+            </TabsContent>
+          </>
+        ) : (
+          <TabsContent value="people" className="mt-4">
+            <PeopleList fixedRole={fixedRole} onInvite={() => setInviteOpen(true)} />
+          </TabsContent>
+        )}
+
+        <TabsContent value="invitations" className="mt-4">
+          <InvitationsList role={fixedRole} />
+        </TabsContent>
+
+        {extraTabs.map((tab) => (
+          <TabsContent key={tab.value} value={tab.value} className="mt-4">
+            {tab.content}
+          </TabsContent>
+        ))}
+      </Tabs>
+
+      <InviteUserDialog open={inviteOpen} onOpenChange={setInviteOpen} defaultRole={fixedRole ?? 'DRIVER'} />
+    </div>
+  );
+}
+
+/**
+ * One role's worth of people, with its own search, filters and sort.
+ *
+ * Each tab mounts its own copy, which is the point: switching from Managers to
+ * Drivers must not carry a half-typed search or a status filter across with it.
+ */
+function PeopleList({
+  fixedRole,
+  onInvite,
+}: {
+  fixedRole?: Extract<Role, 'MANAGER' | 'DRIVER'>;
+  onInvite: () => void;
 }) {
   const queryClient = useQueryClient();
   const list = useListState({ defaultSort: 'createdAt', filterKeys: ['role', 'status'] });
 
-  const [inviteOpen, setInviteOpen] = React.useState(false);
   const [suspending, setSuspending] = React.useState<UserRecord | null>(null);
   const [deleting, setDeleting] = React.useState<UserRecord | null>(null);
 
@@ -169,144 +269,100 @@ export function UsersView({
 
   return (
     <div className="space-y-5">
-      <PageHeader
-        title={title}
-        description={description}
-        actions={
-          <Button onClick={() => setInviteOpen(true)}>
-            <UserPlus />
-            Invite {fixedRole ? fixedRole.toLowerCase() : 'user'}
-          </Button>
-        }
+  <ListToolbar
+        search={list.search}
+        onSearchChange={list.setSearch}
+        searchPlaceholder="Search by name, email or mobile…"
+        total={query.total}
+        loadedCount={query.items.length}
+        filters={[
+          {
+            key: 'status',
+            label: 'Status',
+            value: list.filters.status ?? 'ALL',
+            options: optionsFrom(STATUSES, 'All statuses'),
+            onChange: (value) => list.setFilter('status', value),
+            primary: true,
+          },
+          ...(fixedRole
+            ? []
+            : [
+                {
+                  key: 'role',
+                  label: 'Role',
+                  value: list.filters.role ?? 'ALL',
+                  options: optionsFrom(ROLES, 'All roles'),
+                  onChange: (value: string) => list.setFilter('role', value),
+                  primary: true,
+                },
+              ]),
+        ]}
       />
 
-      <Tabs defaultValue="people">
-        <TabsList>
-          <TabsTrigger value="people">
-            <UsersIcon />
-            People
-          </TabsTrigger>
-          <TabsTrigger value="invitations">
-            <Mail />
-            Invitations
-          </TabsTrigger>
-          {extraTabs.map((tab) => (
-            <TabsTrigger key={tab.value} value={tab.value}>
-              {tab.icon}
-              {tab.label}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-
-        <TabsContent value="people" className="mt-4 space-y-5">
-          <ListToolbar
-            search={list.search}
-            onSearchChange={list.setSearch}
-            searchPlaceholder="Search by name, email or mobile…"
-            total={query.total}
-            loadedCount={query.items.length}
-            filters={[
+      <DataList
+        items={query.items}
+        columns={columns}
+        getRowId={(user) => user.id}
+        isLoading={query.isLoading}
+        isRefetching={query.isRefetching}
+        isError={query.isError}
+        error={query.error}
+        onRetry={() => query.refetch()}
+        hasNextPage={query.hasNextPage}
+        isFetchingNextPage={query.isFetchingNextPage}
+        fetchNextPage={query.fetchNextPage}
+        sortBy={list.sortBy}
+        sortDir={list.sortDir}
+        onSortChange={list.setSort}
+        emptyIcon={<UsersIcon />}
+        emptyTitle="Nobody here yet"
+        emptyDescription="Invite a manager or a driver to get started."
+        emptyAction={
+          <Button onClick={onInvite}>
+            <UserPlus />
+            Invite someone
+          </Button>
+        }
+        mobileRow={(user) => (
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2">
+              <Avatar name={user.name} color={user.avatarColor} size="xs" />
+              <span className="font-medium">{user.name}</span>
+              <StatusBadge status={user.status} size="sm" />
+            </div>
+            <p className="truncate text-xs text-muted-foreground">
+              {humanise(user.role)} · {user.email ?? user.mobile}
+            </p>
+          </div>
+        )}
+        rowActions={(user) => (
+          <RowActions
+            actions={[
               {
-                key: 'status',
-                label: 'Status',
-                value: list.filters.status ?? 'ALL',
-                options: optionsFrom(STATUSES, 'All statuses'),
-                onChange: (value) => list.setFilter('status', value),
-                primary: true,
+                label: 'Suspend account',
+                icon: <Ban />,
+                variant: 'destructive',
+                hidden: user.status !== 'ACTIVE',
+                onSelect: () => setSuspending(user),
               },
-              ...(fixedRole
-                ? []
-                : [
-                    {
-                      key: 'role',
-                      label: 'Role',
-                      value: list.filters.role ?? 'ALL',
-                      options: optionsFrom(ROLES, 'All roles'),
-                      onChange: (value: string) => list.setFilter('role', value),
-                      primary: true,
-                    },
-                  ]),
+              {
+                label: 'Reactivate',
+                icon: <UserCheck />,
+                hidden: user.status !== 'SUSPENDED',
+                onSelect: () => setStatus.mutate({ id: user.id, status: 'ACTIVE' }),
+              },
+              {
+                label: 'Delete account',
+                icon: <Trash2 />,
+                variant: 'destructive',
+                separatorBefore: true,
+                hidden: user.role === 'ADMIN',
+                onSelect: () => setDeleting(user),
+              },
             ]}
           />
-
-          <DataList
-            items={query.items}
-            columns={columns}
-            getRowId={(user) => user.id}
-            isLoading={query.isLoading}
-            isRefetching={query.isRefetching}
-            isError={query.isError}
-            error={query.error}
-            onRetry={() => query.refetch()}
-            hasNextPage={query.hasNextPage}
-            isFetchingNextPage={query.isFetchingNextPage}
-            fetchNextPage={query.fetchNextPage}
-            sortBy={list.sortBy}
-            sortDir={list.sortDir}
-            onSortChange={list.setSort}
-            emptyIcon={<UsersIcon />}
-            emptyTitle="Nobody here yet"
-            emptyDescription="Invite a manager or a driver to get started."
-            emptyAction={
-              <Button onClick={() => setInviteOpen(true)}>
-                <UserPlus />
-                Invite someone
-              </Button>
-            }
-            mobileRow={(user) => (
-              <div className="space-y-1.5">
-                <div className="flex items-center gap-2">
-                  <Avatar name={user.name} color={user.avatarColor} size="xs" />
-                  <span className="font-medium">{user.name}</span>
-                  <StatusBadge status={user.status} size="sm" />
-                </div>
-                <p className="truncate text-xs text-muted-foreground">
-                  {humanise(user.role)} · {user.email ?? user.mobile}
-                </p>
-              </div>
-            )}
-            rowActions={(user) => (
-              <RowActions
-                actions={[
-                  {
-                    label: 'Suspend account',
-                    icon: <Ban />,
-                    variant: 'destructive',
-                    hidden: user.status !== 'ACTIVE',
-                    onSelect: () => setSuspending(user),
-                  },
-                  {
-                    label: 'Reactivate',
-                    icon: <UserCheck />,
-                    hidden: user.status !== 'SUSPENDED',
-                    onSelect: () => setStatus.mutate({ id: user.id, status: 'ACTIVE' }),
-                  },
-                  {
-                    label: 'Delete account',
-                    icon: <Trash2 />,
-                    variant: 'destructive',
-                    separatorBefore: true,
-                    hidden: user.role === 'ADMIN',
-                    onSelect: () => setDeleting(user),
-                  },
-                ]}
-              />
-            )}
-          />
-        </TabsContent>
-
-        <TabsContent value="invitations" className="mt-4">
-          <InvitationsList role={fixedRole} />
-        </TabsContent>
-
-        {extraTabs.map((tab) => (
-          <TabsContent key={tab.value} value={tab.value} className="mt-4">
-            {tab.content}
-          </TabsContent>
-        ))}
-      </Tabs>
-
-      <InviteUserDialog open={inviteOpen} onOpenChange={setInviteOpen} defaultRole={fixedRole ?? 'DRIVER'} />
+        )}
+      />
 
       <ConfirmDialog
         open={Boolean(suspending)}

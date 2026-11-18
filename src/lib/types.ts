@@ -195,6 +195,20 @@ export interface ManagerFleetTruck {
   createdAt: string;
 }
 
+/** One driver as they appear inside a manager's group. */
+export interface ManagerFleetDriver {
+  id: string;
+  name: string;
+  mobile?: string | null;
+  email?: string | null;
+  avatarColor?: string;
+  status: UserStatus;
+  licenseNumber?: string | null;
+  licenseExpiry?: string | null;
+  assignedTruck: { id: string; truckNumber: string } | null;
+  activeTripCount: number;
+}
+
 export interface ManagerFleetGroup {
   manager: {
     id: string;
@@ -209,6 +223,9 @@ export interface ManagerFleetGroup {
   /** Trucks another manager owns that were shared with this one. */
   sharedInCount: number;
   trucks: ManagerFleetTruck[];
+  driverCount: number;
+  driversByStatus: Partial<Record<UserStatus, number>>;
+  drivers: ManagerFleetDriver[];
 }
 
 /** The signed-in manager's own fleet — see /my-fleet. */
@@ -269,7 +286,17 @@ export interface ManagerFleetReport {
   groups: ManagerFleetGroup[];
   /** Trucks nobody holds yet. */
   unassigned: ManagerFleetTruck[];
-  totals: { managers: number; trucks: number; assigned: number; unassigned: number };
+  /** Drivers nobody manages yet. */
+  unassignedDrivers: ManagerFleetDriver[];
+  totals: {
+    managers: number;
+    trucks: number;
+    assigned: number;
+    unassigned: number;
+    drivers: number;
+    assignedDrivers: number;
+    unassignedDrivers: number;
+  };
 }
 
 export interface Cargo {

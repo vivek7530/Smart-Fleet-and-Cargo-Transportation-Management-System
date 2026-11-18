@@ -443,6 +443,20 @@ export interface ManagerFleetTruck {
   createdAt: Date;
 }
 
+/** One driver as they appear inside a manager's group. */
+export interface ManagerFleetDriver {
+  id: string;
+  name: string;
+  mobile?: string | null;
+  email?: string | null;
+  avatarColor?: string;
+  status: string;
+  licenseNumber?: string | null;
+  licenseExpiry?: Date | null;
+  assignedTruck: { id: string; truckNumber: string } | null;
+  activeTripCount: number;
+}
+
 export interface ManagerFleetGroup {
   manager: {
     id: string;
@@ -458,13 +472,27 @@ export interface ManagerFleetGroup {
   /** Trucks another manager owns that were shared with this one. */
   sharedInCount: number;
   trucks: ManagerFleetTruck[];
+  driverCount: number;
+  /** Only the statuses actually present, so the UI renders no empty chips. */
+  driversByStatus: Record<string, number>;
+  drivers: ManagerFleetDriver[];
 }
 
 export interface ManagerFleetReport {
   groups: ManagerFleetGroup[];
   /** Trucks nobody holds — the red flag an administrator has to resolve. */
   unassigned: ManagerFleetTruck[];
-  totals: { managers: number; trucks: number; assigned: number; unassigned: number };
+  /** Drivers nobody manages — the same red flag, on the people side. */
+  unassignedDrivers: ManagerFleetDriver[];
+  totals: {
+    managers: number;
+    trucks: number;
+    assigned: number;
+    unassigned: number;
+    drivers: number;
+    assignedDrivers: number;
+    unassignedDrivers: number;
+  };
 }
 
 type LeanFleetTruck = {
@@ -494,7 +522,7 @@ type LeanFleetTruck = {
  * consistent: the counts and the rows below them come from the same read.
  */
 export async function listFleetByManager(): Promise<ManagerFleetReport> {
-  const [managers, trucks] = await Promise.all([
+  const [managers, trucks, drivers, busy] = await Promise.all([
     User.find({ role: 'MANAGER', status: { $ne: 'ARCHIVED' } })
       .select('name email mobile avatarColor status')
       .sort({ name: 1 })
@@ -504,6 +532,15 @@ export async function listFleetByManager(): Promise<ManagerFleetReport> {
       .populate('assignedDriver', 'name avatarColor')
       .sort({ truckNumber: 1 })
       .lean<LeanFleetTruck[]>(),
+    User.find({ role: 'DRIVER', status: { $ne: 'ARCHIVED' } })
+      .select('name email mobile avatarColor status licenseNumber licenseExpiry manager')
+      .sort({ name: 1 })
+      .lean(),
+    // One aggregate for every driver's live trip count, rather than a query each.
+    Trip.aggregate<{ _id: Types.ObjectId; count: number }>([
+      { $match: { status: { $in: ['ASSIGNED', 'LOADING', 'IN_TRANSIT'] } } },
+      { $group: { _id: '$driver', count: { $sum: 1 } } },
+    ]),
   ]);
 
   const shape = (truck: LeanFleetTruck): ManagerFleetTruck => ({
@@ -551,11 +588,58 @@ export async function listFleetByManager(): Promise<ManagerFleetReport> {
     }
   }
 
+  // Which truck each driver is behind the wheel of, from the fleet already read.
+  const truckByDriver = new Map<string, { id: string; truckNumber: string }>();
+  for (const truck of trucks) {
+    if (truck.assignedDriver) {
+      truckByDriver.set(String(truck.assignedDriver._id), {
+        id: String(truck._id),
+        truckNumber: truck.truckNumber,
+      });
+    }
+  }
+
+  const activeByDriver = new Map(busy.filter((row) => row._id).map((row) => [String(row._id), row.count]));
+
+  const driversByManager = new Map<string, ManagerFleetDriver[]>();
+  const unassignedDrivers: ManagerFleetDriver[] = [];
+
+  for (const driver of drivers) {
+    const id = String(driver._id);
+    const row: ManagerFleetDriver = {
+      id,
+      name: driver.name,
+      mobile: driver.mobile ?? null,
+      email: driver.email ?? null,
+      avatarColor: driver.avatarColor,
+      status: driver.status,
+      licenseNumber: driver.licenseNumber ?? null,
+      licenseExpiry: driver.licenseExpiry ?? null,
+      assignedTruck: truckByDriver.get(id) ?? null,
+      activeTripCount: activeByDriver.get(id) ?? 0,
+    };
+
+    const managerId = driver.manager ? String(driver.manager) : null;
+    if (!managerId) {
+      unassignedDrivers.push(row);
+      continue;
+    }
+    const bucket = driversByManager.get(managerId);
+    if (bucket) bucket.push(row);
+    else driversByManager.set(managerId, [row]);
+  }
+
   const groups: ManagerFleetGroup[] = managers.map((manager) => {
     const id = String(manager._id);
     const list = owned.get(id) ?? [];
     const byStatus: Record<string, number> = {};
     for (const truck of list) byStatus[truck.status] = (byStatus[truck.status] ?? 0) + 1;
+
+    const roster = driversByManager.get(id) ?? [];
+    const driversByStatus: Record<string, number> = {};
+    for (const driver of roster) {
+      driversByStatus[driver.status] = (driversByStatus[driver.status] ?? 0) + 1;
+    }
 
     return {
       manager: {
@@ -570,6 +654,9 @@ export async function listFleetByManager(): Promise<ManagerFleetReport> {
       byStatus,
       sharedInCount: sharedIn.get(id) ?? 0,
       trucks: list,
+      driverCount: roster.length,
+      driversByStatus,
+      drivers: roster,
     };
   });
 
@@ -580,11 +667,15 @@ export async function listFleetByManager(): Promise<ManagerFleetReport> {
   return {
     groups,
     unassigned,
+    unassignedDrivers,
     totals: {
       managers: groups.length,
       trucks: trucks.length,
       assigned: trucks.length - unassigned.length,
       unassigned: unassigned.length,
+      drivers: drivers.length,
+      assignedDrivers: drivers.length - unassignedDrivers.length,
+      unassignedDrivers: unassignedDrivers.length,
     },
   };
 }

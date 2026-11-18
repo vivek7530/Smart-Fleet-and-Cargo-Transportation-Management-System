@@ -7,6 +7,7 @@ export default function UsersPage() {
     <UsersView
       title="Users"
       description="Everyone with access to CargoEntry, and every invitation still outstanding."
+      roleTabs
     />
   );
 }
