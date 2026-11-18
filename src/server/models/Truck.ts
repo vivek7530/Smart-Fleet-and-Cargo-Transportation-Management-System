@@ -1,5 +1,11 @@
 import { Schema, model, models, type Document, type Model, type Types } from 'mongoose';
 import { FUEL_TYPES, TRUCK_STATUSES, type FuelType, type TruckStatus } from '../types/enums';
+import {
+  ownerHistorySchema,
+  shareSchema,
+  type OwnerHistoryEntry,
+  type ShareEntry,
+} from './share.schema';
 
 /**
  * `model` is a real truck attribute, which collides with Mongoose's
@@ -28,6 +34,17 @@ export interface TruckDocument extends Omit<Document, 'model'> {
   purchasePrice?: number;
   purchaseVendor?: string;
   notes?: string;
+  /**
+   * The manager responsible for this truck. `null` means nobody holds it yet —
+   * an administrator has to assign it, and until then it shows as a red flag
+   * and is invisible to every manager.
+   */
+  owner?: Types.ObjectId | null;
+  /** Managers an administrator granted access to, at VIEW or EDIT. */
+  sharedWith: ShareEntry[];
+  /** Every manager who has held this truck, so old revenue stays attributable. */
+  ownerHistory: OwnerHistoryEntry[];
+  /** Who first entered the truck — history, not authority. `owner` decides access. */
   createdBy?: Types.ObjectId | null;
   createdAt: Date;
   updatedAt: Date;
@@ -56,6 +73,9 @@ const truckSchema = new Schema<TruckDocument>(
     purchasePrice: { type: Number, min: 0 },
     purchaseVendor: { type: String, trim: true },
     notes: { type: String, trim: true, maxlength: 2000 },
+    owner: { type: Schema.Types.ObjectId, ref: 'User', default: null, index: true },
+    sharedWith: { type: [shareSchema], default: [] },
+    ownerHistory: { type: [ownerHistorySchema], default: [] },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
   },
   {
@@ -67,6 +87,9 @@ const truckSchema = new Schema<TruckDocument>(
 
 truckSchema.index({ status: 1, createdAt: -1 });
 truckSchema.index({ createdAt: -1 });
+// Every manager-scoped truck list leads with the owner predicate.
+truckSchema.index({ owner: 1, status: 1, createdAt: -1 });
+truckSchema.index({ 'sharedWith.user': 1 });
 
 export const Truck: Model<TruckDocument> =
   (models.Truck as Model<TruckDocument> | undefined) ?? model<TruckDocument>('Truck', truckSchema);

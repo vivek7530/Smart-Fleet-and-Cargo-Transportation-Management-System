@@ -176,9 +176,13 @@ export default function TripDetailPage() {
           <FinanceTile
             label="Profit"
             value={formatCurrency(trip.profit)}
-            tone={trip.profit >= 0 ? 'success' : 'danger'}
+            tone={(trip.profit ?? 0) >= 0 ? 'success' : 'danger'}
             icon={<Route />}
-            hint={trip.revenue ? `${((trip.profit / trip.revenue) * 100).toFixed(1)}% margin` : undefined}
+            hint={
+              trip.revenue && trip.profit !== undefined
+                ? `${((trip.profit / trip.revenue) * 100).toFixed(1)}% margin`
+                : undefined
+            }
           />
         </section>
       ) : null}

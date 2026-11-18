@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test",
     "db:performance-indexes": "tsx scripts/create-performance-indexes.ts",
+    "migrate:ownership": "tsx src/server/seed/migrate-ownership.ts",
     "seed": "tsx src/server/seed/seed.ts",
     "seed:reset": "tsx src/server/seed/seed.ts --reset",
     "icons": "node scripts/generate-icons.cjs"

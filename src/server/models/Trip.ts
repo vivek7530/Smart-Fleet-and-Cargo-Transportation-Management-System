@@ -1,5 +1,6 @@
 import { Schema, model, models, type Document, type Model, type Types } from 'mongoose';
 import { TRIP_STATUSES, type TripStatus } from '../types/enums';
+import { shareSchema, type ShareEntry } from './share.schema';
 
 export interface TripStatusEvent {
   status: TripStatus;
@@ -51,6 +52,19 @@ export interface TripDocument extends Document {
   completedAt?: Date | null;
   cancelledReason?: string;
   statusHistory: TripStatusEvent[];
+  /**
+   * Denormalised from the trip's truck, so every list and report stays a single
+   * indexed query. Kept in sync whenever the truck is transferred or shared.
+   */
+  owner?: Types.ObjectId | null;
+  sharedWith: ShareEntry[];
+  /**
+   * Set when a truck changed hands while this trip was already finished: the
+   * money belongs to the manager named here, not to the current owner. The new
+   * owner still sees the trip, but without its figures, and it is left out of
+   * their report totals. `null` means the current owner earned it.
+   */
+  inheritedFrom?: Types.ObjectId | null;
   createdBy?: Types.ObjectId | null;
   createdAt: Date;
   updatedAt: Date;
@@ -116,6 +130,9 @@ const tripSchema = new Schema<TripDocument>(
     completedAt: { type: Date, default: null },
     cancelledReason: { type: String, trim: true },
     statusHistory: { type: [statusEventSchema], default: [] },
+    owner: { type: Schema.Types.ObjectId, ref: 'User', default: null, index: true },
+    sharedWith: { type: [shareSchema], default: [] },
+    inheritedFrom: { type: Schema.Types.ObjectId, ref: 'User', default: null, index: true },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
   },
   {
@@ -155,6 +172,11 @@ tripSchema.index(
   { partialFilterExpression: { status: 'COMPLETED' } },
 );
 tripSchema.index({ createdAt: -1 });
+// Manager-scoped trip lists.
+tripSchema.index({ owner: 1, status: 1, startDate: -1 });
+// Report aggregates, which also exclude inherited revenue.
+tripSchema.index({ owner: 1, inheritedFrom: 1, startDate: -1 });
+tripSchema.index({ 'sharedWith.user': 1 });
 
 export const Trip: Model<TripDocument> =
   (models.Trip as Model<TripDocument> | undefined) ?? model<TripDocument>('Trip', tripSchema);

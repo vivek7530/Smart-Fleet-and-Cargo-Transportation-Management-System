@@ -1,7 +1,10 @@
 /** Types mirroring the API contract. */
 
 export type Role = 'ADMIN' | 'MANAGER' | 'DRIVER';
-export type UserStatus = 'INVITED' | 'ACTIVE' | 'SUSPENDED';
+/** `ARCHIVED` is a soft delete — no sign-in, hidden from lists, record kept. */
+export type UserStatus = 'INVITED' | 'ACTIVE' | 'SUSPENDED' | 'ARCHIVED';
+/** What a manager may do with a truck an administrator shared with them. */
+export type SharePermission = 'VIEW' | 'EDIT';
 export type InvitationStatus = 'NONE' | 'PENDING' | 'ACCEPTED' | 'EXPIRED' | 'REVOKED';
 export type InvitationChannel = 'EMAIL' | 'MOBILE';
 
@@ -101,6 +104,8 @@ export interface UserRecord extends Omit<SessionUser, 'lockedContactField'> {
   lockedContactField?: 'email' | 'mobile' | null;
   invitationStatus: InvitationStatus;
   invitedBy?: { id: string; name: string; role: Role } | null;
+  /** DRIVER only: the manager they work under. `null` is the unassigned red flag. */
+  manager?: { id: string; name: string; avatarColor?: string } | null;
   address?: string;
   experienceYears?: number;
   emergencyContactName?: string;
@@ -157,7 +162,21 @@ export interface Truck {
   purchasePrice?: number;
   purchaseVendor?: string;
   notes?: string;
+  /** The manager responsible. `null` is the unassigned red flag. */
+  owner?: OwnerRef | null;
+  /** Managers an administrator gave access to. */
+  sharedWith?: ShareRef[];
+  /** False for a VIEW-only sharee — the figures are stripped server-side too. */
+  canSeeFinancials?: boolean;
   createdAt: string;
+}
+
+export type OwnerRef = Pick<UserRecord, 'id' | 'name' | 'avatarColor'> & { role?: Role };
+
+export interface ShareRef {
+  user: OwnerRef;
+  permission: SharePermission;
+  sharedAt: string;
 }
 
 export interface Cargo {
@@ -209,17 +228,29 @@ export interface Trip {
   odometerReadings: TripOdometerReading[];
   status: TripStatus;
   startOverdue?: boolean;
-  revenue: number;
-  transportationCost: number;
-  driverExpenseTotal: number;
-  fuelCost: number;
-  totalExpenses: number;
-  profit: number;
+  // Optional because the API strips them for a VIEW-only sharee, for an
+  // inherited trip, and for drivers. Absent means "not yours to see".
+  revenue?: number;
+  transportationCost?: number;
+  driverExpenseTotal?: number;
+  fuelCost?: number;
+  totalExpenses?: number;
+  profit?: number;
   notes?: string;
   startedAt?: string | null;
   completedAt?: string | null;
   cancelledReason?: string;
   statusHistory: TripStatusEvent[];
+  owner?: OwnerRef | null;
+  sharedWith?: ShareRef[];
+  /**
+   * Set when the truck changed hands after this trip finished: the figures
+   * belong to the manager named here, so they are hidden from the current owner
+   * and left out of their totals.
+   */
+  inheritedFrom?: OwnerRef | null;
+  /** False for a VIEW-only sharee or an inherited trip — money fields are absent. */
+  canSeeFinancials?: boolean;
   createdBy?: { id: string; name: string; role: Role } | null;
   createdAt: string;
 }

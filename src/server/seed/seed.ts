@@ -103,6 +103,8 @@ interface SeedTruck {
   purchasePrice: number;
   purchaseVendor: string;
   notes?: string;
+  owner: Types.ObjectId | null;
+  ownerHistory: { owner: Types.ObjectId; from: Date; to: Date | null }[];
   createdBy: Types.ObjectId;
   createdAt: Date;
 }
@@ -151,6 +153,34 @@ async function seed() {
   const admin = (await User.findOne({ role: 'ADMIN' }).sort({ createdAt: 1 }))!;
   const passwordHash = await hashPassword(DEMO_PASSWORD);
 
+  // -------------------------------------------------------------------------
+  // The fleet is partitioned deliberately rather than at random, because the
+  // whole point of ownership is who holds what. A random split makes the
+  // handover and red-flag paths impossible to test.
+  //
+  // Trucks 0–7 → manager 0, 8–14 → manager 1, 15–18 → manager 2, and truck 19
+  // is left with NO owner so the red flag is visible the moment the app opens.
+  // -------------------------------------------------------------------------
+  const TRUCK_OWNER_SPLIT = [8, 7, 4] as const;
+
+  /** Which manager (by index) owns a given truck, or null for the unowned one. */
+  const ownerIndexForTruck = (truckIndex: number): number | null => {
+    let upTo = 0;
+    for (let manager = 0; manager < TRUCK_OWNER_SPLIT.length; manager += 1) {
+      upTo += TRUCK_OWNER_SPLIT[manager];
+      if (truckIndex < upTo) return manager;
+    }
+    return null;
+  };
+
+  // Which trucks carry a permanent driver. Chosen so every manager has a crew
+  // of their own — a positional 0..9 map would have given manager 2 nobody.
+  // There are 10 drivers and 9 slots, so the last driver is left with no truck
+  // and no manager: the second red flag.
+  const DRIVER_TRUCKS = [0, 1, 2, 3, 8, 9, 10, 17, 18] as const;
+  const truckIndexForDriver = (driverIndex: number): number | null =>
+    driverIndex < DRIVER_TRUCKS.length ? DRIVER_TRUCKS[driverIndex] : null;
+
   const managers = await User.insertMany(
     MANAGERS.map((manager, index) => ({
       ...manager,
@@ -166,13 +196,21 @@ async function seed() {
   );
 
   const drivers = await User.insertMany(
-    DRIVERS.map((driver, index) => ({
+    DRIVERS.map((driver, index) => {
+      // A driver works under the manager who owns the truck they drive. The
+      // last driver has no truck, so they have no manager either.
+      const truckIndex = truckIndexForDriver(index);
+      const ownerIndex = truckIndex === null ? null : ownerIndexForTruck(truckIndex);
+      const manager = ownerIndex === null ? null : managers[ownerIndex];
+
+      return {
       ...driver,
       passwordHash,
       role: 'DRIVER',
       status: 'ACTIVE',
       invitationStatus: 'ACCEPTED',
-      invitedBy: managers[index % managers.length]._id,
+      manager: manager?._id ?? null,
+      invitedBy: manager?._id ?? admin._id,
       // Every driver here was invited by mobile, so mobile is their locked contact.
       lockedContactField: 'mobile',
       email: index % 3 === 0 ? `${driver.name.split(' ')[0].toLowerCase()}.driver@cargoentry.dev` : undefined,
@@ -180,7 +218,8 @@ async function seed() {
       designation: 'Long-haul Driver',
       avatarColor: ['violet', 'cyan', 'rose', 'teal', 'indigo'][index % 5],
       createdAt: daysAgo(280 - index * 7),
-    })),
+      };
+    }),
   );
 
   logger.success(`Created ${managers.length} managers and ${drivers.length} drivers`);
@@ -198,8 +237,13 @@ async function seed() {
     const truckNumber = `${state}${String(int(1, 48)).padStart(2, '0')}${letters()}${String(1000 + index * 37).slice(0, 4)}`;
     const purchaseDate = daysAgo(int(400, 2_200));
 
-    // The first ten trucks each carry a permanent driver.
-    const assignedDriver = index < drivers.length ? drivers[index]._id : null;
+    const ownerIndex = ownerIndexForTruck(index);
+    const owner = ownerIndex === null ? null : managers[ownerIndex];
+
+    // The driver who sits with this truck, if any — the inverse of the mapping
+    // used when the drivers were created, so the two always agree.
+    const driverSlot = DRIVER_TRUCKS.indexOf(index as (typeof DRIVER_TRUCKS)[number]);
+    const assignedDriver = driverSlot === -1 ? null : drivers[driverSlot]._id;
 
     trucks.push({
       truckNumber,
@@ -222,7 +266,9 @@ async function seed() {
       purchaseDate,
       purchasePrice: spec.price,
       purchaseVendor: `${spec.make} Authorised Dealership`,
-      createdBy: pick(managers)._id,
+      owner: owner?._id ?? null,
+      ownerHistory: owner ? [{ owner: owner._id, from: purchaseDate, to: null }] : [],
+      createdBy: owner?._id ?? admin._id,
       createdAt: purchaseDate,
     });
   }
@@ -278,7 +324,10 @@ async function seed() {
     if (isLive) busyTrucks.add(String(truck._id));
 
     const driver = drivers.find((d) => String(d._id) === String(truck.assignedDriver)) ?? pick(drivers);
-    const manager = pick(managers);
+    // The trip belongs to whoever owns the truck. Picking a manager at random
+    // here would produce trips run by someone who does not hold the vehicle,
+    // which every ownership rule would then reject.
+    const manager = managers.find((m) => String(m._id) === String(truck.owner)) ?? managers[0];
 
     const startDate = daysAgo(step.startOffset, int(5, 11));
     const transitDays = Math.max(1, Math.round(route.km / 480));
@@ -357,6 +406,10 @@ async function seed() {
       completedAt,
       cancelledReason: step.status === 'CANCELLED' ? 'Consignor withdrew the booking' : undefined,
       statusHistory,
+      // Denormalised from the truck, exactly as a real transfer would leave it.
+      owner: truck.owner ?? null,
+      sharedWith: [],
+      inheritedFrom: null,
       createdBy: manager._id,
       createdAt: addDays(startDate, -2),
     });

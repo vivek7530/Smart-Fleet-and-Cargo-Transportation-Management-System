@@ -11,7 +11,6 @@ import { DocumentRecord } from '../../models/DocumentRecord';
 import { BreakdownReport } from '../../models/BreakdownReport';
 import { Maintenance } from '../../models/Maintenance';
 import { ApiError } from '../../lib/ApiError';
-import { assertDriverNameAvailable } from '../../lib/driver-name';
 import {
   dateRangeFilter,
   mergeFilters,
@@ -47,8 +46,6 @@ export async function inviteUser(input: InviteUserInput, ctx: Ctx) {
   const channel = input.channel ?? (input.email ? 'EMAIL' : 'MOBILE');
   const lockedContactField = channel === 'EMAIL' ? 'email' : 'mobile';
   const destination = channel === 'EMAIL' ? input.email! : input.mobile!;
-
-  if (input.role === 'DRIVER') await assertDriverNameAvailable(input.name);
 
   if (input.email) await assertContactAvailable('email', input.email);
   if (input.mobile) await assertContactAvailable('mobile', input.mobile);
@@ -193,10 +190,6 @@ export async function updateUser(id: string, input: UpdateUserInput, ctx: Ctx) {
   }
   if (user.role === 'ADMIN' && input.role && input.role !== 'ADMIN') {
     await assertNotLastAdmin(String(user._id));
-  }
-
-  if ((input.name || input.role === 'DRIVER') && (input.role ?? user.role) === 'DRIVER') {
-    await assertDriverNameAvailable(input.name ?? user.name, String(user._id));
   }
 
   // The channel that delivered the invitation stays immutable for the lifetime

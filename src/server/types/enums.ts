@@ -3,8 +3,23 @@
 export const ROLES = ['ADMIN', 'MANAGER', 'DRIVER'] as const;
 export type Role = (typeof ROLES)[number];
 
-export const USER_STATUSES = ['INVITED', 'ACTIVE', 'SUSPENDED'] as const;
+/**
+ * `ARCHIVED` is a soft delete: the account can never sign in again and is hidden
+ * from every list, but the record survives so their name still resolves on the
+ * trips and audit entries they left behind.
+ */
+export const USER_STATUSES = ['INVITED', 'ACTIVE', 'SUSPENDED', 'ARCHIVED'] as const;
 export type UserStatus = (typeof USER_STATUSES)[number];
+
+/** Statuses that may not sign in or make an authenticated request. */
+export const BLOCKED_USER_STATUSES: readonly UserStatus[] = ['INVITED', 'SUSPENDED', 'ARCHIVED'];
+
+/**
+ * What a manager may do with a truck an administrator shared with them.
+ * `VIEW` is operational only — the financial figures are stripped server-side.
+ */
+export const SHARE_PERMISSIONS = ['VIEW', 'EDIT'] as const;
+export type SharePermission = (typeof SHARE_PERMISSIONS)[number];
 
 export const INVITATION_STATUSES = ['NONE', 'PENDING', 'ACCEPTED', 'EXPIRED', 'REVOKED'] as const;
 export type InvitationStatus = (typeof INVITATION_STATUSES)[number];
@@ -45,6 +60,12 @@ export const TRIP_STATUSES = [
 export type TripStatus = (typeof TRIP_STATUSES)[number];
 
 /** Allowed forward transitions of the trip lifecycle. */
+/**
+ * Trips that are finished one way or the other. A truck changing hands stamps
+ * these as inherited, so the money stays with whoever actually earned it.
+ */
+export const TERMINAL_TRIP_STATUSES: readonly TripStatus[] = ['COMPLETED', 'CANCELLED'];
+
 export const TRIP_TRANSITIONS: Record<TripStatus, TripStatus[]> = {
   PLANNED: ['ASSIGNED', 'CANCELLED'],
   ASSIGNED: ['LOADING', 'IN_TRANSIT', 'CANCELLED'],
@@ -142,6 +163,13 @@ export const NOTIFICATION_TYPES = [
   'INVITATION_SENT',
   'INVITATION_ACCEPTED',
   'MAINTENANCE_DUE',
+  /** A truck (and its trips and driver) moved to a different manager. */
+  'TRUCK_TRANSFERRED',
+  /** An administrator shared a truck with you, or withdrew that share. */
+  'TRUCK_SHARED',
+  'SHARE_REVOKED',
+  /** An administrator acted on something you own — never let that happen silently. */
+  'ADMIN_ACTION',
   'GENERAL',
 ] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];

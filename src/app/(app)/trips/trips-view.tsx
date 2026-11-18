@@ -126,7 +126,7 @@ export function TripsView({ title, description }: { title: string; description: 
       align: 'right',
       hideBelow: 'xl',
       render: (trip) => (
-        <span className={`tabular font-medium ${trip.profit >= 0 ? 'text-success' : 'text-destructive'}`}>
+        <span className={`tabular font-medium ${(trip.profit ?? 0) >= 0 ? 'text-success' : 'text-destructive'}`}>
           {formatCurrency(trip.profit)}
         </span>
       ),

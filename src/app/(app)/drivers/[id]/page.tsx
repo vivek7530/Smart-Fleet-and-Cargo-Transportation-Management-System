@@ -60,7 +60,8 @@ export default function DriverDetailPage() {
 
   const { driver, assignedTruck, recentTrips } = data;
   const completed = recentTrips.filter((trip) => trip.status === 'COMPLETED').length;
-  const revenue = recentTrips.reduce((sum, trip) => sum + trip.revenue, 0);
+  // Trips whose figures are not ours to see simply contribute nothing.
+  const revenue = recentTrips.reduce((sum, trip) => sum + (trip.revenue ?? 0), 0);
 
   return (
     <div className="space-y-6">

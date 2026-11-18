@@ -2,7 +2,6 @@ import dns from 'node:dns';
 import mongoose from 'mongoose';
 import { env } from './config/env';
 import { logger } from './lib/logger';
-import { User } from './models/User';
 
 // The MongoDB driver uses dns.promises internally for SRV lookups, which
 // maintains a separate server list from the callback-based dns API.
@@ -57,15 +56,6 @@ export async function connectToDatabase(): Promise<typeof mongoose> {
   }
 
   const connection = await cache.promise;
-  // This invariant must hold in production too, where Mongoose autoIndex is off.
-  await User.collection.createIndex(
-    { nameKey: 1 },
-    {
-      name: 'unique_driver_name_key',
-      unique: true,
-      partialFilterExpression: { role: 'DRIVER', nameKey: { $type: 'string' } },
-    },
-  );
   cache.conn = connection;
   return connection;
 }
