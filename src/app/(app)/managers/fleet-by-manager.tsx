@@ -55,7 +55,7 @@ const SORT_OPTIONS = [
  * arrive whole, and filtering in the browser means the totals can never
  * disagree with the rows underneath them the way a re-paginated view can.
  */
-export function FleetByManager() {
+export function FleetByManager({ defaultTab = 'trucks' }: { defaultTab?: 'trucks' | 'drivers' }) {
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['/trucks/by-manager'],
     queryFn: () => api.get<ManagerFleetReport>('/trucks/by-manager'),
@@ -85,7 +85,7 @@ export function FleetByManager() {
   }
 
   return (
-    <Tabs defaultValue="trucks" className="space-y-4">
+    <Tabs defaultValue={defaultTab} className="space-y-4">
       <TabsList>
         <TabsTrigger value="trucks">
           <TruckIcon />
