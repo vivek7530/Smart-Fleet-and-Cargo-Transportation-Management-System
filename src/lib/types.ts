@@ -166,12 +166,22 @@ export interface Truck {
   owner?: OwnerRef | null;
   /** Managers an administrator gave access to. */
   sharedWith?: ShareRef[];
+  /** Every manager who has held this truck, most recent stretch last. */
+  ownerHistory?: OwnerHistoryRef[];
   /** False for a VIEW-only sharee — the figures are stripped server-side too. */
   canSeeFinancials?: boolean;
   createdAt: string;
 }
 
 export type OwnerRef = Pick<UserRecord, 'id' | 'name' | 'avatarColor'> & { role?: Role };
+
+/** One stretch of time a truck spent under a particular manager. */
+export interface OwnerHistoryRef {
+  owner: OwnerRef | null;
+  from: string;
+  /** null while this is the current stretch. */
+  to?: string | null;
+}
 
 export interface ShareRef {
   user: OwnerRef;

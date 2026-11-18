@@ -155,8 +155,25 @@ export default function TripDetailPage() {
         </div>
       ) : null}
 
+      {/*
+        The server strips the figures when they are not this viewer's and sets
+        `canSeeFinancials` so the UI can say why. Without that line the tiles
+        render four zeroes, which reads as a trip that earned nothing rather
+        than one whose books belong to somebody else.
+      */}
+      {canManage && trip.canSeeFinancials === false ? (
+        <div className="surface-card p-4 text-[13px]">
+          <p className="font-medium">The figures for this trip are not shown</p>
+          <p className="mt-0.5 text-muted-foreground">
+            {trip.inheritedFrom
+              ? `It was run and paid for under ${trip.inheritedFrom.name}, before this truck changed hands. The operational detail below is current; the money stays with whoever earned it.`
+              : 'This truck was shared with you for viewing, so its revenue and costs stay with the manager who holds it.'}
+          </p>
+        </div>
+      ) : null}
+
       {/* Financials are a back-office concern. */}
-      {canManage ? (
+      {canManage && trip.canSeeFinancials !== false ? (
         <section className="grid gap-4 grid-auto-fit" aria-label="Trip financials">
           <FinanceTile label="Revenue" value={formatCurrency(trip.revenue)} tone="default" icon={<BadgeIndianRupee />} />
           <FinanceTile

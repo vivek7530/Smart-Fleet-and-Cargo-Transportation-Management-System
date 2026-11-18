@@ -19,7 +19,7 @@ import {
 import { toast } from 'sonner';
 import { api, errorMessage } from '@/lib/api';
 import { formatCurrency, formatDate, formatNumber, formatWeight } from '@/lib/format';
-import { humanise } from '@/lib/utils';
+import { cn, humanise } from '@/lib/utils';
 import type {
   DocumentRecord,
   FuelRecord,
@@ -218,6 +218,10 @@ export default function TruckDetailPage() {
             <Separator />
 
             <SharedWith truck={truck} />
+
+            <Separator />
+
+            <OwnershipHistory truck={truck} />
 
             {truck.notes ? (
               <>
@@ -573,6 +577,67 @@ function SharedWith({ truck }: { truck: Truck }) {
           A view-only manager sees the truck and its trips with the figures removed.
         </p>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * Who has held this truck, and when.
+ *
+ * The history has been written since ownership landed and nothing ever read
+ * it. It matters now that trucks can change hands: a trip from March is
+ * attributed to whoever held the truck in March, and this is the only place
+ * that says who that was. Without it, an inherited trip's hidden figures look
+ * like a bug rather than a rule.
+ */
+function OwnershipHistory({ truck }: { truck: Truck }) {
+  const history = truck.ownerHistory ?? [];
+  // One unbroken stretch is just "the owner", which the page already shows.
+  if (history.length < 2) return null;
+
+  return (
+    <div className="space-y-3">
+      <p className="flex items-center gap-1.5 text-2xs font-semibold uppercase tracking-wide text-muted-foreground">
+        <CalendarClock className="size-3.5" />
+        Ownership history
+      </p>
+
+      <ol className="space-y-3">
+        {[...history].reverse().map((entry, index) => (
+          <li key={`${entry.from}-${index}`} className="flex gap-3">
+            <div className="flex flex-col items-center">
+              <span
+                className={cn(
+                  'mt-1 size-2 rounded-full',
+                  entry.to ? 'bg-border' : 'bg-primary',
+                )}
+              />
+              {index < history.length - 1 ? <span className="mt-1 w-px flex-1 bg-border" /> : null}
+            </div>
+
+            <div className="min-w-0 flex-1 pb-1">
+              <p className="flex items-center gap-2 text-[13px] font-medium">
+                {entry.owner ? (
+                  <>
+                    <Avatar name={entry.owner.name} color={entry.owner.avatarColor} size="xs" />
+                    <span className="truncate">{entry.owner.name}</span>
+                  </>
+                ) : (
+                  <span className="text-muted-foreground">No manager</span>
+                )}
+                {!entry.to ? (
+                  <Badge variant="success" size="sm">
+                    now
+                  </Badge>
+                ) : null}
+              </p>
+              <p className="text-2xs text-muted-foreground">
+                {formatDate(entry.from)} — {entry.to ? formatDate(entry.to) : 'present'}
+              </p>
+            </div>
+          </li>
+        ))}
+      </ol>
     </div>
   );
 }

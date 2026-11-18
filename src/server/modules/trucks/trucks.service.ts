@@ -88,7 +88,8 @@ export async function getTruck(id: string, user: ActorLike) {
   const truck = await Truck.findById(id)
     .populate('assignedDriver', 'name mobile email avatarColor licenseNumber')
     .populate('owner', 'name avatarColor role')
-    .populate('sharedWith.user', 'name avatarColor role');
+    .populate('sharedWith.user', 'name avatarColor role')
+    .populate('ownerHistory.owner', 'name avatarColor role');
   if (!truck) throw ApiError.notFound('That truck could not be found');
   assertCanSee(truck, user, 'truck');
 
