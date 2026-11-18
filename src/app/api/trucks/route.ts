@@ -9,8 +9,8 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   return handle(async () => {
-    await requireStaff(request);
-    return ok(await listTrucks(parseQuery(request, listTrucksQuerySchema)));
+    const ctx = await requireStaff(request);
+    return ok(await listTrucks(parseQuery(request, listTrucksQuerySchema), ctx.user));
   });
 }
 

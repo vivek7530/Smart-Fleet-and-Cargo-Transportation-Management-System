@@ -91,6 +91,25 @@ export default function TrucksPage() {
         ),
     },
     {
+      key: 'owner',
+      header: 'Manager',
+      width: 'minmax(150px, 1.2fr)',
+      hideBelow: 'xl',
+      render: (truck) =>
+        truck.owner ? (
+          <div className="flex items-center gap-2">
+            <Avatar name={truck.owner.name} color={truck.owner.avatarColor} size="xs" />
+            <span className="truncate">{truck.owner.name}</span>
+          </div>
+        ) : (
+          // Nobody is responsible for this truck. Said plainly, because a quiet
+          // dash reads like "no data" rather than "this needs deciding".
+          <span className="inline-flex items-center rounded-md bg-destructive-soft px-2 py-0.5 text-xs font-medium text-destructive">
+            No manager
+          </span>
+        ),
+    },
+    {
       key: 'capacity',
       header: 'Capacity',
       width: 'minmax(90px, 0.6fr)',

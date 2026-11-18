@@ -47,6 +47,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return result.user;
     },
     onSuccess(user) {
+      // Anything still cached was fetched for whoever was signed in before —
+      // a session that expired rather than being signed out leaves it behind.
+      // Now that lists are scoped per manager, serving that to the next person
+      // would show them someone else's fleet until the first refetch lands.
+      queryClient.clear();
       queryClient.setQueryData(SESSION_QUERY_KEY, user);
     },
   });

@@ -19,6 +19,8 @@ export const createTruckSchema = z.object({
   fuelType: z.enum(FUEL_TYPES).default('DIESEL'),
   status: z.enum(TRUCK_STATUSES).default('AVAILABLE'),
   assignedDriver: objectId.nullable().optional(),
+  // Honoured only for an administrator; a manager always owns what they create.
+  owner: objectId.nullable().optional(),
   odometerKm: z.coerce.number().finite().min(0).multipleOf(0.1).default(0),
   mileageKmPerLitre: z.coerce.number().min(0).max(100).optional(),
   insuranceProvider: z.string().trim().max(120).optional(),
@@ -42,6 +44,10 @@ export const listTrucksQuerySchema = listQuerySchema.extend({
   fuelType: z.enum(FUEL_TYPES).optional(),
   assignedDriver: objectId.optional(),
   unassigned: z.coerce.boolean().optional(),
+  // Administrative views of the whole fleet; ignored for a manager, whose own
+  // scope already decides what they can see.
+  owner: objectId.optional(),
+  unowned: z.coerce.boolean().optional(),
 });
 
 export const assignDriverSchema = z.object({

@@ -17,6 +17,19 @@ import {
 } from '../../lib/pagination';
 import { recordAudit } from '../../services/audit.service';
 import { notify } from '../../services/notification.service';
+import {
+  assertCanEdit,
+  assertCanSee,
+  canSeeFinancials,
+  isAdmin,
+  ownerScopeFor,
+  redactTripFor,
+  redactTruckFor,
+  refId,
+  omitFields,
+  type ActorLike,
+  type OwnedLike,
+} from '../../lib/ownership';
 import type { CreateTruckInput, UpdateTruckInput } from './trucks.validation';
 
 const SEARCH_FIELDS = ['truckNumber', 'registrationNumber', 'make', 'model', 'insuranceProvider'];
@@ -27,44 +40,69 @@ type TruckListQuery = ListQuery & {
   fuelType?: string;
   assignedDriver?: string;
   unassigned?: boolean;
+  owner?: string;
+  unowned?: boolean;
 };
 
-export async function listTrucks(query: TruckListQuery) {
+const TRUCK_OWNER_POPULATE = [
+  { path: 'assignedDriver', select: 'name mobile email avatarColor' },
+  { path: 'owner', select: 'name avatarColor role' },
+];
+
+export async function listTrucks(query: TruckListQuery, user: ActorLike) {
   const { sortBy, sortDir } = resolveSort(query, SORT_FIELDS);
 
   const filter = mergeFilters(
+    // Leads the filter so the { owner, status, createdAt } index is used.
+    ownerScopeFor(user),
     query.status ? { status: query.status } : null,
     query.fuelType ? { fuelType: query.fuelType } : null,
     query.assignedDriver ? { assignedDriver: query.assignedDriver } : null,
     query.unassigned ? { assignedDriver: null } : null,
+    // Filtering by owner is an administrative view of the whole fleet. For a
+    // manager the scope above already decides what they see, so letting them
+    // pass an owner could only ever narrow it — never widen it — but it would
+    // also confirm which manager ids exist, so it is ignored outright.
+    isAdmin(user) && query.owner ? { owner: query.owner } : null,
+    isAdmin(user) && query.unowned ? { owner: null } : null,
     searchFilter(query.search, SEARCH_FIELDS),
   );
 
-  return paginate(Truck, {
+  const page = await paginate(Truck, {
     filter,
     limit: query.limit,
     cursor: query.cursor,
     sortBy,
     sortDir,
-    populate: { path: 'assignedDriver', select: 'name mobile email avatarColor' },
+    populate: TRUCK_OWNER_POPULATE,
   });
+
+  return {
+    ...page,
+    items: page.items.map((item) => redactTruckFor(item, item as OwnedLike, user)),
+  };
 }
 
-export async function getTruck(id: string) {
-  const truck = await Truck.findById(id).populate('assignedDriver', 'name mobile email avatarColor licenseNumber');
+export async function getTruck(id: string, user: ActorLike) {
+  const truck = await Truck.findById(id)
+    .populate('assignedDriver', 'name mobile email avatarColor licenseNumber')
+    .populate('owner', 'name avatarColor role');
   if (!truck) throw ApiError.notFound('That truck could not be found');
+  assertCanSee(truck, user, 'truck');
 
   const [recentTrips, recentMaintenance, recentFuel, documents, totals] = await Promise.all([
     Trip.find({ truck: truck._id }).sort({ createdAt: -1 }).limit(5).populate('driver', 'name'),
     Maintenance.find({ truck: truck._id }).sort({ date: -1 }).limit(5),
     FuelRecord.find({ truck: truck._id }).sort({ date: -1 }).limit(5),
     DocumentRecord.find({ truck: truck._id }).sort({ createdAt: -1 }).limit(10),
-    truckTotals(String(truck._id)),
+    truckTotals(String(truck._id), user, truck),
   ]);
 
   return {
-    truck: truck.toJSON(),
-    recentTrips: recentTrips.map((t) => t.toJSON()),
+    truck: redactTruckFor(truck.toJSON(), truck, user),
+    // Each trip carries its own answer: a trip inherited from a previous owner
+    // keeps its figures hidden even on a truck this manager fully owns.
+    recentTrips: recentTrips.map((trip) => redactTripFor(trip.toJSON(), trip, user)),
     recentMaintenance: recentMaintenance.map((m) => m.toJSON()),
     recentFuel: recentFuel.map((f) => f.toJSON()),
     documents: documents.map((d) => d.toJSON()),
@@ -72,12 +110,19 @@ export async function getTruck(id: string) {
   };
 }
 
-async function truckTotals(truckId: string) {
+async function truckTotals(truckId: string, user: ActorLike, truck: OwnedLike) {
   const truckObjectId = new Types.ObjectId(truckId);
+
+  // A manager's totals leave out trips inherited from a previous owner: that
+  // revenue is not theirs, and rolling it in would overstate their performance.
+  // The administrator sees the truck's complete lifetime figures.
+  const revenueMatch = isAdmin(user)
+    ? { truck: truckObjectId }
+    : { truck: truckObjectId, inheritedFrom: null };
 
   const [trips, maintenance, fuel] = await Promise.all([
     Trip.aggregate<{ _id: null; count: number; revenue: number }>([
-      { $match: { truck: truckObjectId } },
+      { $match: revenueMatch },
       { $group: { _id: null, count: { $sum: 1 }, revenue: { $sum: { $cond: [{ $eq: ['$status', 'COMPLETED'] }, '$revenue', 0] } } } },
     ]),
     Maintenance.aggregate<{ _id: null; cost: number; count: number }>([
@@ -90,7 +135,7 @@ async function truckTotals(truckId: string) {
     ]),
   ]);
 
-  return {
+  const totals = {
     totalTrips: trips[0]?.count ?? 0,
     totalRevenue: trips[0]?.revenue ?? 0,
     maintenanceCost: maintenance[0]?.cost ?? 0,
@@ -98,19 +143,35 @@ async function truckTotals(truckId: string) {
     fuelCost: fuel[0]?.cost ?? 0,
     fuelLitres: Math.round((fuel[0]?.litres ?? 0) * 100) / 100,
   };
+
+  // A VIEW sharee is here to help run the truck, not to read its economics.
+  // Trip and litre counts are operational, so they stay.
+  if (canSeeFinancials(truck, user)) return totals;
+  return omitFields(totals, ['totalRevenue', 'maintenanceCost', 'fuelCost']);
 }
 
 export async function createTruck(input: CreateTruckInput, ctx: Ctx) {
   const actor = ctx.user;
-  if (input.assignedDriver) await assertDriverAssignable(input.assignedDriver);
+
+  // A manager always creates a truck for themselves — the body is never trusted
+  // to say otherwise, or one manager could file a truck under another. An
+  // administrator chooses, and may deliberately leave it unowned, which puts it
+  // on the red-flag list rather than quietly attaching it to whoever typed it in.
+  const { owner: requestedOwner, ...rest } = input;
+  const owner = isAdmin(actor) ? (requestedOwner ?? null) : actor._id;
+  if (owner && isAdmin(actor)) await assertOwnerIsManager(String(owner));
+
+  if (input.assignedDriver) await assertDriverAssignable(input.assignedDriver, owner);
 
   const truck = await Truck.create({
-    ...input,
+    ...rest,
     status: input.assignedDriver ? 'ASSIGNED' : input.status,
+    owner,
+    ownerHistory: owner ? [{ owner, from: new Date(), to: null }] : [],
     createdBy: actor._id,
   });
 
-  if (input.assignedDriver) await detachDriverFromOtherTrucks(input.assignedDriver, String(truck._id));
+  if (input.assignedDriver) await detachDriverFromOtherTrucks(input.assignedDriver, String(truck._id), owner);
 
   await recordAudit({
     ctx,
@@ -128,9 +189,18 @@ export async function updateTruck(id: string, input: UpdateTruckInput, ctx: Ctx)
   const actor = ctx.user;
   const truck = await Truck.findById(id);
   if (!truck) throw ApiError.notFound('That truck could not be found');
+  assertCanEdit(truck, actor, 'truck');
+
+  // Handing a truck to a different manager is a transfer, not an edit: it has to
+  // carry the trips and the driver with it, so it belongs to the ownership
+  // service and to an administrator. Silently ignoring the field here would hide
+  // a failed intent, so say so.
+  if (input.owner !== undefined && refId(input.owner) !== refId(truck.owner)) {
+    throw ApiError.forbidden('Use the transfer action to move a truck to another manager');
+  }
 
   if (input.assignedDriver && input.assignedDriver !== String(truck.assignedDriver)) {
-    await assertDriverAssignable(input.assignedDriver);
+    await assertDriverAssignable(input.assignedDriver, truck.owner);
   }
 
   if (input.assignedDriver !== undefined && input.assignedDriver !== String(truck.assignedDriver ?? '') && truck.status === 'IN_TRIP') {
@@ -161,7 +231,7 @@ export async function updateTruck(id: string, input: UpdateTruckInput, ctx: Ctx)
   }
 
   await truck.save();
-  if (input.assignedDriver) await detachDriverFromOtherTrucks(input.assignedDriver, String(truck._id));
+  if (input.assignedDriver) await detachDriverFromOtherTrucks(input.assignedDriver, String(truck._id), truck.owner);
 
   await recordAudit({
     ctx,
@@ -178,6 +248,7 @@ export async function assignDriver(id: string, driverId: string | null, ctx: Ctx
   const actor = ctx.user;
   const truck = await Truck.findById(id);
   if (!truck) throw ApiError.notFound('That truck could not be found');
+  assertCanEdit(truck, actor, 'truck');
 
   if (driverId !== String(truck.assignedDriver ?? '') && truck.status === 'IN_TRIP') {
     throw ApiError.conflict('The assigned driver cannot be changed while this truck is on a trip');
@@ -188,11 +259,11 @@ export async function assignDriver(id: string, driverId: string | null, ctx: Ctx
   }
 
   if (driverId) {
-    const driver = await assertDriverAssignable(driverId);
+    const driver = await assertDriverAssignable(driverId, truck.owner);
     truck.assignedDriver = driver._id;
     if (truck.status === 'AVAILABLE') truck.status = 'ASSIGNED';
     await truck.save();
-    await detachDriverFromOtherTrucks(driverId, String(truck._id));
+    await detachDriverFromOtherTrucks(driverId, String(truck._id), truck.owner);
 
     await notify({
       users: [driver._id],
@@ -233,6 +304,7 @@ export async function deleteTruck(id: string, ctx: Ctx) {
   const actor = ctx.user;
   const truck = await Truck.findById(id);
   if (!truck) throw ApiError.notFound('That truck could not be found');
+  assertCanEdit(truck, actor, 'truck');
 
   const activeTrips = await Trip.countDocuments({
     truck: truck._id,
@@ -290,17 +362,46 @@ export async function getAssignedTruckFor(driverId: string) {
   };
 }
 
-async function assertDriverAssignable(driverId: string) {
+/** An owner must be a manager who can actually take responsibility today. */
+async function assertOwnerIsManager(ownerId: string) {
+  const manager = await User.findOne({ _id: ownerId, role: 'MANAGER' }).select('status');
+  if (!manager) throw ApiError.badRequest('The selected owner is not a manager');
+  if (manager.status !== 'ACTIVE') throw ApiError.badRequest('Only an active manager can own a truck');
+}
+
+/**
+ * A driver can only be put on a truck belonging to the manager they work under.
+ *
+ * The message never names the other manager: a manager who can tell "this
+ * driver works for someone else" from "no such driver" can map the roster by
+ * guessing identifiers.
+ */
+async function assertDriverAssignable(driverId: string, truckOwner: unknown) {
   const driver = await User.findOne({ _id: driverId, role: 'DRIVER' });
   if (!driver) throw ApiError.badRequest('The selected driver could not be found');
   if (driver.status !== 'ACTIVE') throw ApiError.badRequest('Only active drivers can be assigned to a truck');
+
+  const owner = refId(truckOwner);
+  if (owner === null) {
+    throw ApiError.badRequest('Assign this truck to a manager before giving it a driver');
+  }
+  if (refId(driver.manager) !== owner) {
+    throw ApiError.badRequest('The selected driver could not be found');
+  }
   return driver;
 }
 
-/** A driver may hold only one truck at a time. */
-async function detachDriverFromOtherTrucks(driverId: string, keepTruckId: string) {
+/**
+ * A driver may hold only one truck at a time.
+ *
+ * Scoped to the trucks of the same manager. Unscoped, assigning a driver could
+ * reach across and quietly strip a truck belonging to someone else — and that
+ * manager would simply find their truck driverless one morning with nothing in
+ * the audit log to explain it.
+ */
+async function detachDriverFromOtherTrucks(driverId: string, keepTruckId: string, owner: unknown) {
   await Truck.updateMany(
-    { assignedDriver: driverId, _id: { $ne: keepTruckId } },
+    { assignedDriver: driverId, _id: { $ne: keepTruckId }, owner: owner ?? null },
     { assignedDriver: null, $set: { status: 'AVAILABLE' } },
   );
 }

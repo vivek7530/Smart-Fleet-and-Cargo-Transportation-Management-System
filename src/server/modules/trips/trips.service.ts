@@ -26,6 +26,17 @@ import { recordAudit } from '../../services/audit.service';
 import { notify, usersWithRoles } from '../../services/notification.service';
 import { TRIP_TRANSITIONS, type TripStatus } from '../../types/enums';
 import { advanceTruckOdometer } from '../../services/odometer.service';
+import {
+  assertCanEdit,
+  assertCanSee,
+  canAccess,
+  canSeeFinancials,
+  isAdmin,
+  ownerScopeFor,
+  redactTripFor,
+  refId,
+  type OwnedLike,
+} from '../../lib/ownership';
 
 const SEARCH_FIELDS = ['tripCode', 'pickupLocation', 'deliveryLocation', 'notes'];
 const SORT_FIELDS = ['createdAt', 'tripCode', 'startDate', 'expectedDeliveryDate', 'status', 'revenue'];
@@ -44,9 +55,16 @@ type TripListQuery = ListQuery & {
   active?: boolean;
 };
 
-/** Drivers can only ever see the trips assigned to them — enforced here, not in the UI. */
+/**
+ * Who may see which trips — enforced here, not in the UI.
+ *
+ * A driver sees the trips assigned to them. A manager sees the trips of the
+ * trucks they own or that an administrator shared with them. An administrator
+ * sees everything, and `ownerScopeFor` returns `{}` for them.
+ */
 export function tripScopeFor(user: UserDocument) {
-  return user.role === 'DRIVER' ? { driver: user._id } : {};
+  if (user.role === 'DRIVER') return { driver: user._id };
+  return ownerScopeFor(user);
 }
 
 export async function listTrips(query: TripListQuery, user: UserDocument) {
@@ -62,7 +80,7 @@ export async function listTrips(query: TripListQuery, user: UserDocument) {
     dateRangeFilter('startDate', query.from, query.to),
   );
 
-  return paginate(Trip, {
+  const page = await paginate(Trip, {
     filter,
     limit: query.limit,
     cursor: query.cursor,
@@ -70,10 +88,19 @@ export async function listTrips(query: TripListQuery, user: UserDocument) {
     sortDir,
     populate: TRIP_POPULATE,
   });
+
+  return {
+    ...page,
+    items: page.items.map((item) => redactTripFor(item, item as OwnedLike, user)),
+  };
 }
 
 export async function getTrip(id: string, user: UserDocument) {
-  const trip = await Trip.findById(id).populate(TRIP_POPULATE).populate('createdBy', 'name role');
+  const trip = await Trip.findById(id)
+    .populate(TRIP_POPULATE)
+    .populate('createdBy', 'name role')
+    .populate('owner', 'name avatarColor role')
+    .populate('inheritedFrom', 'name avatarColor role');
   if (!trip) throw ApiError.notFound('That trip could not be found');
   assertCanSeeTrip(trip, user);
 
@@ -84,11 +111,15 @@ export async function getTrip(id: string, user: UserDocument) {
     DocumentRecord.find({ trip: trip._id }).sort({ createdAt: -1 }),
   ]);
 
+  // The cost records are the trip's money in itemised form, so hiding the
+  // totals while listing every expense line would achieve nothing.
+  const showMoney = canSeeFinancials(trip, user);
+
   return {
-    trip: trip.toJSON(),
-    expenses: expenses.map((e) => e.toJSON()),
-    transportationCosts: costs.map((c) => c.toJSON()),
-    fuelRecords: fuel.map((f) => f.toJSON()),
+    trip: redactTripFor(trip.toJSON(), trip, user),
+    expenses: showMoney ? expenses.map((e) => e.toJSON()) : [],
+    transportationCosts: showMoney ? costs.map((c) => c.toJSON()) : [],
+    fuelRecords: showMoney ? fuel.map((f) => f.toJSON()) : [],
     documents: documents.map((d) => d.toJSON()),
   };
 }
@@ -108,8 +139,20 @@ export async function createTrip(input: Record<string, never>, ctx: Ctx) {
     notes?: string;
   };
 
-  if (body.truck) await assertTruckUsable(body.truck, new Date(body.startDate), new Date(body.expectedDeliveryDate));
-  if (body.driver) await assertDriverUsable(body.driver, new Date(body.startDate), new Date(body.expectedDeliveryDate));
+  // A trip belongs to whoever owns its truck, so the truck has to be one this
+  // user may actually run. Without a truck there is nothing to derive ownership
+  // from, so the trip starts owned by the manager planning it.
+  const truck = body.truck
+    ? await assertTruckUsable(body.truck, new Date(body.startDate), new Date(body.expectedDeliveryDate), undefined, actor)
+    : null;
+
+  // Resolved before the driver check, because who the trip belongs to is what
+  // decides which drivers may be put on it.
+  const owner = truck ? (truck.owner ?? null) : isAdmin(actor) ? null : actor._id;
+
+  if (body.driver) {
+    await assertDriverUsable(body.driver, new Date(body.startDate), new Date(body.expectedDeliveryDate), undefined, owner);
+  }
   if (body.cargo?.length) await assertCargoAvailable(body.cargo);
 
   const tripCode = await nextCode('TRP');
@@ -128,6 +171,9 @@ export async function createTrip(input: Record<string, never>, ctx: Ctx) {
     revenue: body.revenue ?? 0,
     notes: body.notes,
     status,
+    // Denormalised from the truck so every list and report stays one query.
+    owner,
+    sharedWith: truck?.sharedWith ?? [],
     createdBy: actor._id,
     statusHistory: [{ status, at: new Date(), by: actor._id, note: 'Trip created' }],
   });
@@ -155,10 +201,21 @@ export async function createHistoricalTrip(input: z.infer<typeof historicalTripS
   const truckId = input.truck ?? null;
   const driverId = input.driver ?? null;
 
+  let owner: unknown = null;
+  let inheritedFrom: unknown = null;
+
   if (truckId) {
-    const truck = await Truck.findById(truckId).select('truckNumber');
+    const truck = await Truck.findById(truckId).select('truckNumber owner sharedWith ownerHistory');
     if (!truck) throw ApiError.badRequest('The selected truck could not be found');
     await assertHistoricalResourceAvailable('truck', truckId, start, end, truck.truckNumber);
+
+    // The trip lands under whoever holds the truck now, so it stays with the
+    // vehicle. But a historical trip was earned by whoever held the truck at
+    // the time — if that is someone else, the money is theirs, not the current
+    // owner's, and `ownerHistory` is what records that.
+    owner = truck.owner ?? null;
+    const earner = ownerAt(truck.ownerHistory, end);
+    if (earner !== null && refId(earner) !== refId(truck.owner)) inheritedFrom = earner;
   }
   if (driverId) {
     const driver = await User.findOne({ _id: driverId, role: 'DRIVER' }).select('name');
@@ -184,6 +241,8 @@ export async function createHistoricalTrip(input: z.infer<typeof historicalTripS
     revenue: input.revenue,
     notes: input.notes,
     status: 'COMPLETED',
+    owner,
+    inheritedFrom,
     createdBy: ctx.user._id,
     statusHistory: [
       { status: 'ASSIGNED', at: start, by: ctx.user._id, note: 'Historical record entered' },
@@ -222,6 +281,7 @@ export async function updateTrip(id: string, input: Record<string, unknown>, ctx
   const actor = ctx.user;
   const trip = await Trip.findById(id);
   if (!trip) throw ApiError.notFound('That trip could not be found');
+  assertCanChangeTrip(trip, actor);
   if (['COMPLETED', 'CANCELLED'].includes(trip.status)) {
     throw ApiError.conflict(`Trip ${trip.tripCode} is ${trip.status.toLowerCase()} and can no longer be edited`);
   }
@@ -244,11 +304,20 @@ export async function updateTrip(id: string, input: Record<string, unknown>, ctx
   if (proposedEnd < proposedStart) throw ApiError.validation('Expected delivery must be on or after the start date');
   const proposedTruck = input.truck === undefined ? previousTruck : input.truck as string | null;
   const proposedDriver = input.driver === undefined ? previousDriver : input.driver as string | null;
+  // Moving a trip onto a different truck moves who is responsible for it, so
+  // the new truck has to be one this user may run — and the trip's owner
+  // follows the truck, exactly as it does on a transfer.
+  let movedToTruck: Awaited<ReturnType<typeof assertTruckUsable>> | null = null;
   if (proposedTruck && (proposedTruck !== previousTruck || input.startDate || input.expectedDeliveryDate)) {
-    await assertTruckUsable(proposedTruck, proposedStart, proposedEnd, String(trip._id));
+    movedToTruck = await assertTruckUsable(proposedTruck, proposedStart, proposedEnd, String(trip._id), actor);
+  }
+  // The trip's owner follows its truck, exactly as it does on a transfer.
+  if (movedToTruck && proposedTruck !== previousTruck) {
+    trip.owner = movedToTruck.owner ?? null;
+    trip.sharedWith = movedToTruck.sharedWith ?? [];
   }
   if (proposedDriver && (proposedDriver !== previousDriver || input.startDate || input.expectedDeliveryDate)) {
-    await assertDriverUsable(proposedDriver, proposedStart, proposedEnd, String(trip._id));
+    await assertDriverUsable(proposedDriver, proposedStart, proposedEnd, String(trip._id), trip.owner ?? null);
   }
 
   if (Array.isArray(input.cargo)) {
@@ -304,7 +373,7 @@ export async function changeTripStatus(
   const actor = ctx.user;
   const trip = await Trip.findById(id);
   if (!trip) throw ApiError.notFound('That trip could not be found');
-  assertCanSeeTrip(trip, actor);
+  assertCanChangeTrip(trip, actor);
 
   if (nextStatus === 'IN_TRANSIT') {
     throw ApiError.conflict('Use the start-trip workflow and record the starting odometer reading');
@@ -341,7 +410,7 @@ export async function startTrip(id: string, body: { note?: string; odometerKm: n
   const actor = ctx.user;
   const trip = await Trip.findById(id);
   if (!trip) throw ApiError.notFound('That trip could not be found');
-  assertCanSeeTrip(trip, actor);
+  assertCanChangeTrip(trip, actor);
 
   if (!trip.truck || !trip.driver) {
     throw ApiError.conflict('Assign a truck and a driver before starting this trip');
@@ -406,6 +475,7 @@ export async function completeTrip(
   const actor = ctx.user;
   const trip = await Trip.findById(id);
   if (!trip) throw ApiError.notFound('That trip could not be found');
+  assertCanChangeTrip(trip, actor);
 
   if (trip.status === 'COMPLETED') throw ApiError.conflict('This trip is already completed');
   if (!['IN_TRANSIT', 'DELIVERED'].includes(trip.status)) {
@@ -474,6 +544,7 @@ export async function cancelTrip(id: string, reason: string, ctx: Ctx) {
   const actor = ctx.user;
   const trip = await Trip.findById(id);
   if (!trip) throw ApiError.notFound('That trip could not be found');
+  assertCanChangeTrip(trip, actor);
   if (['COMPLETED', 'CANCELLED'].includes(trip.status)) {
     throw ApiError.conflict(`Trip ${trip.tripCode} is already ${trip.status.toLowerCase()}`);
   }
@@ -509,6 +580,7 @@ export async function deleteTrip(id: string, ctx: Ctx) {
   const actor = ctx.user;
   const trip = await Trip.findById(id);
   if (!trip) throw ApiError.notFound('That trip could not be found');
+  assertCanChangeTrip(trip, actor);
   if (!['PLANNED', 'CANCELLED'].includes(trip.status)) {
     throw ApiError.conflict('Only planned or cancelled trips can be deleted. Cancel the trip first.');
   }
@@ -653,18 +725,66 @@ function assertTransitionAllowed(trip: TripDocument, next: TripStatus) {
 }
 
 function assertCanSeeTrip(trip: TripDocument, user: UserDocument) {
-  if (user.role !== 'DRIVER') return;
-  const driverId = trip.driver && typeof trip.driver === 'object' && '_id' in trip.driver
-    ? String((trip.driver as { _id: Types.ObjectId })._id)
-    : String(trip.driver);
-  if (driverId !== String(user._id)) {
-    throw ApiError.forbidden('This trip is not assigned to you');
+  if (user.role === 'DRIVER') {
+    const driverId = refId(trip.driver);
+    if (driverId !== String(user._id)) {
+      throw ApiError.forbidden('This trip is not assigned to you');
+    }
+    return;
   }
+  // Managers see their own and shared trips; administrators see everything.
+  assertCanSee(trip, user, 'trip');
 }
 
-async function assertTruckUsable(truckId: string, start: Date, end: Date, excludeTripId?: string) {
+/** Changing a trip needs EDIT, which a VIEW-only sharee does not have. */
+/**
+ * Who held a truck on a given date, from its ownership history.
+ *
+ * Returns null when the history says nothing about that date — an empty
+ * history, or a date before the truck was first assigned. Null means "we do not
+ * know", never "nobody", so the caller leaves the figures where they are rather
+ * than attributing them to a guess.
+ */
+export function ownerAt(
+  history: { owner?: unknown; from: Date; to?: Date | null }[] | undefined,
+  when: Date,
+): unknown {
+  for (const period of history ?? []) {
+    const from = new Date(period.from).getTime();
+    const to = period.to ? new Date(period.to).getTime() : Infinity;
+    if (when.getTime() >= from && when.getTime() <= to) return period.owner ?? null;
+  }
+  return null;
+}
+
+function assertCanChangeTrip(trip: TripDocument, user: UserDocument) {
+  if (user.role === 'DRIVER') {
+    assertCanSeeTrip(trip, user);
+    return;
+  }
+  assertCanEdit(trip, user, 'trip');
+}
+
+/**
+ * `actor` is required rather than optional on purpose. An optional authorization
+ * argument is one a future call site forgets to pass, and the check then fails
+ * open with nothing to show for it.
+ */
+async function assertTruckUsable(
+  truckId: string,
+  start: Date,
+  end: Date,
+  excludeTripId: string | undefined,
+  actor: UserDocument,
+) {
   const truck = await Truck.findById(truckId);
   if (!truck) throw ApiError.badRequest('The selected truck could not be found');
+  // Running a trip on a truck is a change to that truck's week, so it needs
+  // EDIT. The message matches "not found" on purpose: a manager must not be
+  // able to tell another manager's truck from one that does not exist.
+  if (!canAccess(truck, actor, 'EDIT')) {
+    throw ApiError.badRequest('The selected truck could not be found');
+  }
   if (['MAINTENANCE', 'INACTIVE'].includes(truck.status)) {
     throw ApiError.conflict(`Truck ${truck.truckNumber} is ${truck.status.toLowerCase()} and cannot be dispatched`);
   }
@@ -680,10 +800,26 @@ async function assertTruckUsable(truckId: string, start: Date, end: Date, exclud
   return truck;
 }
 
-async function assertDriverUsable(driverId: string, start: Date, end: Date, excludeTripId?: string) {
+/**
+ * `expectedOwner` is the manager the trip will belong to — required, for the
+ * same reason as above. `null` means the trip has no owner yet, which only an
+ * administrator can bring about, so any driver is allowed in that case.
+ */
+async function assertDriverUsable(
+  driverId: string,
+  start: Date,
+  end: Date,
+  excludeTripId: string | undefined,
+  expectedOwner: unknown,
+) {
   const driver = await User.findOne({ _id: driverId, role: 'DRIVER' });
   if (!driver) throw ApiError.badRequest('The selected driver could not be found');
   if (driver.status !== 'ACTIVE') throw ApiError.badRequest('Only active drivers can be assigned to a trip');
+  // A driver drives for one manager. Putting someone else's driver on this trip
+  // would hand their working week to a manager who is not responsible for them.
+  if (expectedOwner !== null && refId(driver.manager) !== refId(expectedOwner)) {
+    throw ApiError.badRequest('The selected driver could not be found');
+  }
   await assertResourceHasNoTripOverlap('driver', driverId, start, end, excludeTripId, driver.name);
   return driver;
 }
