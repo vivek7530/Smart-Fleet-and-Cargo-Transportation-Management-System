@@ -10,10 +10,12 @@ import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { formatDate } from '@/lib/format';
+import { optionalPhoneField } from '@/lib/phone';
 import type { Invitation, Page, Role, UserRecord } from '@/lib/types';
 import { ResourceDialog, useMutationErrors } from '@/components/data/resource-dialog';
 import { FormField } from '@/components/ui/form-field';
 import { Input } from '@/components/ui/input';
+import { PhoneInput } from '@/components/ui/phone-input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -27,13 +29,7 @@ const inviteSchema = z
   .object({
     name: z.string().trim().min(2, 'Enter the person’s full name').max(120),
     email: z.union([z.literal(''), z.string().trim().email('Enter a valid email address')]),
-    mobile: z.union([
-      z.literal(''),
-      z
-        .string()
-        .trim()
-        .regex(/^\+?[0-9\s-]{8,18}$/, 'Enter a valid mobile number'),
-    ]),
+    mobile: optionalPhoneField,
     role: z.enum(['MANAGER', 'DRIVER']),
     channel: z.enum(['EMAIL', 'MOBILE']),
     /** Drivers only; '' means the administrator left it for later. */
@@ -273,13 +269,7 @@ export function InviteUserDialog({
         error={errors.mobile?.message}
         hint={channel === 'EMAIL' ? 'Optional — they can add it themselves later.' : undefined}
       >
-        <Input
-          id="invite-mobile"
-          type="tel"
-
-          invalid={Boolean(errors.mobile)}
-          {...form.register('mobile')}
-        />
+        <PhoneInput id="invite-mobile" invalid={Boolean(errors.mobile)} {...form.register('mobile')} />
       </FormField>
     </ResourceDialog>
   );

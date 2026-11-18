@@ -519,7 +519,7 @@ function FuelFormDialog({
           <Input id="fuel-date" type="date" invalid={Boolean(errors.date)} {...form.register('date')} />
         </FormField>
 
-        <FormField label="Payment mode">
+        <FormField label="Paid by">
           <Select
             value={form.watch('paymentMode')}
             onValueChange={(value) => form.setValue('paymentMode', value as FuelValues['paymentMode'])}
@@ -555,7 +555,7 @@ function FuelFormDialog({
           <Input id="odometerKm" type="number" min={trucks?.items.find((truck) => truck.id === form.watch('truck'))?.odometerKm ?? 0} step="0.1" disabled={record?.odometerKm != null} {...form.register('odometerKm')} />
         </FormField>
 
-        <FormField label="Station" htmlFor="station">
+        <FormField label="Fuel station" htmlFor="station">
           <Input id="station" placeholder="Indian Oil — NH48" {...form.register('station')} />
         </FormField>
       </FormGrid>

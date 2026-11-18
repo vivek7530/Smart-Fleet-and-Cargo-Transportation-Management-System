@@ -411,10 +411,10 @@ export function TruckFormDialog({
 
       <FormSection title="Compliance" description="Expiry dates drive the document warnings on the dashboard.">
         <FormGrid>
-          <FormField label="Insurance provider" htmlFor="insuranceProvider">
+          <FormField label="Insurance company" htmlFor="insuranceProvider">
             <Input id="insuranceProvider" {...form.register('insuranceProvider')} />
           </FormField>
-          <FormField label="Policy number" htmlFor="insurancePolicyNumber">
+          <FormField label="Insurance policy number" htmlFor="insurancePolicyNumber">
             <Input id="insurancePolicyNumber" {...form.register('insurancePolicyNumber')} />
           </FormField>
           <FormField label="Insurance expiry" htmlFor="insuranceExpiry">
@@ -423,7 +423,7 @@ export function TruckFormDialog({
           <FormField label="Registration expiry" htmlFor="registrationExpiry">
             <Input id="registrationExpiry" type="date" {...form.register('registrationExpiry')} />
           </FormField>
-          <FormField label="Fitness expiry" htmlFor="fitnessExpiry">
+          <FormField label="Fitness certificate expiry" htmlFor="fitnessExpiry">
             <Input id="fitnessExpiry" type="date" {...form.register('fitnessExpiry')} />
           </FormField>
           <FormField label="Permit expiry" htmlFor="permitExpiry">
@@ -440,7 +440,7 @@ export function TruckFormDialog({
           <FormField label="Purchase price (₹)" htmlFor="purchasePrice">
             <Input id="purchasePrice" type="number" {...form.register('purchasePrice')} />
           </FormField>
-          <FormField label="Vendor" htmlFor="purchaseVendor" className="sm:col-span-2">
+          <FormField label="Bought from" htmlFor="purchaseVendor" className="sm:col-span-2">
             <Input id="purchaseVendor" {...form.register('purchaseVendor')} />
           </FormField>
         </FormGrid>

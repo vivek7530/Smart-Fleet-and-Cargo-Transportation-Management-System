@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { formatDate, toDateInput } from '@/lib/format';
 import { humanise } from '@/lib/utils';
+import { formatPhone, normalisePhone, optionalPhoneField } from '@/lib/phone';
 import type { SessionUser } from '@/lib/types';
 import { useAuth } from '@/components/auth-provider';
 import { useMutationErrors } from '@/components/data/resource-dialog';
@@ -18,6 +19,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { FormField, FormGrid } from '@/components/ui/form-field';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { PhoneInput } from '@/components/ui/phone-input';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, Separator, Tooltip } from '@/components/ui/misc';
 import { StatusBadge } from '@/components/ui/status-badge';
@@ -25,19 +27,13 @@ import { StatusBadge } from '@/components/ui/status-badge';
 const profileSchema = z.object({
   name: z.string().trim().min(2, 'Enter your full name').max(120),
   email: z.union([z.literal(''), z.string().trim().email('Enter a valid email address')]),
-  mobile: z.union([
-    z.literal(''),
-    z
-      .string()
-      .trim()
-      .regex(/^\+?[0-9\s-]{8,18}$/, 'Enter a valid mobile number'),
-  ]),
+  mobile: optionalPhoneField,
   designation: z.string().trim().max(120).optional(),
   address: z.string().trim().max(500).optional(),
   licenseNumber: z.string().trim().max(60).optional(),
   licenseExpiry: z.string().optional(),
   emergencyContactName: z.string().trim().max(120).optional(),
-  emergencyContactPhone: z.string().trim().max(30).optional(),
+  emergencyContactPhone: optionalPhoneField,
 });
 
 type ProfileValues = z.infer<typeof profileSchema>;
@@ -100,7 +96,7 @@ export function ProfileSettings({ title, description }: { title: string; descrip
               <div className="flex items-start justify-between gap-3">
                 <dt className="text-muted-foreground">Mobile</dt>
                 <dd className="min-w-0 truncate text-right tabular">
-                  {user.mobile ?? '—'}
+                  {user.mobile ? formatPhone(user.mobile) : '—'}
                   {user.lockedContactField === 'mobile' ? <LockedTag /> : null}
                 </dd>
               </div>
@@ -144,7 +140,7 @@ function ProfileForm({ user, onSaved }: { user: SessionUser; onSaved: () => Prom
     defaultValues: {
       name: user.name,
       email: user.email ?? '',
-      mobile: user.mobile ?? '',
+      mobile: normalisePhone(user.mobile),
       designation: user.designation ?? '',
       address: '',
       licenseNumber: user.licenseNumber ?? '',
@@ -210,7 +206,7 @@ function ProfileForm({ user, onSaved }: { user: SessionUser; onSaved: () => Prom
               <Input id="profile-name" invalid={Boolean(errors.name)} {...form.register('name')} />
             </FormField>
 
-            <FormField label="Designation" htmlFor="profile-designation">
+            <FormField label="Job title" htmlFor="profile-designation">
               <Input id="profile-designation" placeholder="Operations Manager" {...form.register('designation')} />
             </FormField>
 
@@ -243,9 +239,8 @@ function ProfileForm({ user, onSaved }: { user: SessionUser; onSaved: () => Prom
               htmlFor="profile-mobile"
               error={errors.mobile?.message}
             >
-              <Input
+              <PhoneInput
                 id="profile-mobile"
-                type="tel"
                 disabled={user.lockedContactField === 'mobile'}
                 invalid={Boolean(errors.mobile)}
                 {...form.register('mobile')}
@@ -263,8 +258,16 @@ function ProfileForm({ user, onSaved }: { user: SessionUser; onSaved: () => Prom
                 <FormField label="Emergency contact" htmlFor="profile-emergency">
                   <Input id="profile-emergency" placeholder="Name" {...form.register('emergencyContactName')} />
                 </FormField>
-                <FormField label="Emergency phone" htmlFor="profile-emergency-phone">
-                  <Input id="profile-emergency-phone" placeholder="+91XXXXXXXXXX" {...form.register('emergencyContactPhone')} />
+                <FormField
+                  label="Emergency phone"
+                  htmlFor="profile-emergency-phone"
+                  error={errors.emergencyContactPhone?.message}
+                >
+                  <PhoneInput
+                    id="profile-emergency-phone"
+                    invalid={Boolean(errors.emergencyContactPhone)}
+                    {...form.register('emergencyContactPhone')}
+                  />
                 </FormField>
               </>
             ) : null}

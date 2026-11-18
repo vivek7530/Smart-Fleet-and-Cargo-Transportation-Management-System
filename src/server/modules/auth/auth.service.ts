@@ -45,9 +45,12 @@ export function toSessionUser(user: UserDocument): SessionUser {
 
 export async function authenticate(input: LoginInput): Promise<UserDocument> {
   const identifier = input.identifier.trim();
+  const mobile = normaliseMobile(identifier);
   const query = identifier.includes('@')
     ? { email: normaliseEmail(identifier) }
-    : { mobile: normaliseMobile(identifier) };
+    // Accounts created before numbers were stored bare still hold a country
+    // code, so a driver typing their ten digits must match either shape.
+    : { $or: [{ mobile }, { mobile: `+91${mobile}` }, { mobile: `91${mobile}` }] };
 
   const user = await User.findOne(query).select('+passwordHash');
 

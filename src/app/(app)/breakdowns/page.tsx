@@ -344,7 +344,7 @@ function ReportBreakdownDialog({
           )}
         </FormField>
 
-        <FormField label="Severity" required>
+        <FormField label="How serious is it" required>
           <Select
             value={form.watch('severity')}
             onValueChange={(value) => form.setValue('severity', value as BreakdownValues['severity'])}
@@ -429,7 +429,7 @@ function ResolveDialog({
         Resolving the last open report for this truck returns it to service automatically.
       </div>
 
-      <FormField label="Resolution notes" htmlFor="resolve-notes" hint="Shared with the driver who reported it.">
+      <FormField label="How it was fixed" htmlFor="resolve-notes" hint="Shared with the driver who reported it.">
         <Textarea
           id="resolve-notes"
           rows={3}

@@ -18,6 +18,7 @@ import {
 import { toast } from 'sonner';
 import { api, errorMessage } from '@/lib/api';
 import { formatDate, formatRelative } from '@/lib/format';
+import { formatPhone } from '@/lib/phone';
 import { humanise } from '@/lib/utils';
 import type { Invitation, Role, UserRecord } from '@/lib/types';
 import { useInfiniteList } from '@/hooks/use-infinite-list';
@@ -230,7 +231,7 @@ function PeopleList({
           {user.mobile ? (
             <p className="flex items-center gap-1.5 truncate">
               <Smartphone className="size-3 shrink-0 text-muted-foreground" />
-              <span className="tabular">{user.mobile}</span>
+              <span className="tabular">{formatPhone(user.mobile)}</span>
               {user.lockedContactField === 'mobile' ? <LockedPill /> : null}
             </p>
           ) : null}

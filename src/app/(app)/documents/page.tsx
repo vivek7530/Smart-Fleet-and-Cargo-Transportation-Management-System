@@ -579,7 +579,7 @@ function DocumentFormDialog({
       ) : null}
 
       <FormGrid>
-        <FormField label="Reference number" htmlFor="doc-ref" hint="Policy, permit or licence number.">
+        <FormField label="Document number" htmlFor="doc-ref" hint="The policy, permit or licence number on it.">
           <Input id="doc-ref" placeholder="POL/2025/482913" {...form.register('referenceNumber')} />
         </FormField>
 

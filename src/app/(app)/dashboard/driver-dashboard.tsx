@@ -83,7 +83,7 @@ export function DriverDashboardView({ data }: { data: DriverDashboard }) {
               <div className="rounded-lg border bg-muted/35 p-3">
                 <p className="mb-2 flex items-center gap-1.5 text-2xs font-semibold uppercase tracking-wide text-muted-foreground">
                   <Package className="size-3.5" />
-                  Consignments
+                  Goods
                 </p>
                 <ul className="space-y-1.5">
                   {activeTrip.cargo.map((item) => (

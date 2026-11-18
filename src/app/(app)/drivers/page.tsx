@@ -4,6 +4,7 @@ import * as React from 'react';
 import { useRouter } from 'next/navigation';
 import { Eye, IdCard, Manager, Phone, Steering, Truck as TruckIcon, UserPlus, UserRound } from '@/components/icons';
 import { formatDate, formatNumber } from '@/lib/format';
+import { formatPhone } from '@/lib/phone';
 import type { Truck, UserRecord } from '@/lib/types';
 import { useAuth } from '@/components/auth-provider';
 import { useInfiniteList } from '@/hooks/use-infinite-list';
@@ -56,7 +57,7 @@ export default function DriversPage() {
             <p className="truncate font-medium">{driver.name}</p>
             <p className="flex items-center gap-1.5 truncate text-xs text-muted-foreground">
               <Phone className="size-3 shrink-0" />
-              <span className="tabular">{driver.mobile ?? driver.email ?? '—'}</span>
+              <span className="tabular">{driver.mobile ? formatPhone(driver.mobile) : (driver.email ?? '—')}</span>
             </p>
           </div>
         </div>
@@ -281,7 +282,7 @@ export default function DriversPage() {
               <StatusBadge status={driver.status} size="sm" />
             </div>
             <p className="text-xs text-muted-foreground">
-              {driver.mobile} · {driver.assignedTruck?.truckNumber ?? 'No truck'}
+              {formatPhone(driver.mobile)} · {driver.assignedTruck?.truckNumber ?? 'No truck'}
             </p>
             <p className="text-xs text-muted-foreground">
               {driver.tripCount} trips · joined {formatDate(driver.createdAt, 'MMM yyyy')}

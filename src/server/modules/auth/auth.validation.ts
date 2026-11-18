@@ -6,6 +6,7 @@ import {
   optionalMobileField,
   passwordField,
 } from '../../lib/contact';
+import { optionalPhoneField } from '../../../lib/phone';
 
 export const loginSchema = z.object({
   /** Accepts either an email address or a mobile number. */
@@ -27,7 +28,7 @@ export const registerSchema = z
     licenseNumber: z.string().trim().max(60).optional(),
     licenseExpiry: z.string().datetime().or(z.string().date()).optional(),
     emergencyContactName: z.string().trim().max(120).optional(),
-    emergencyContactPhone: z.string().trim().max(30).optional(),
+    emergencyContactPhone: optionalPhoneField,
   })
   .refine((data) => data.password === data.confirmPassword, {
     message: 'Passwords do not match',
@@ -57,7 +58,7 @@ export const updateProfileSchema = z.object({
   address: z.string().trim().max(500).optional(),
   dateOfBirth: z.string().datetime().or(z.string().date()).optional(),
   emergencyContactName: z.string().trim().max(120).optional(),
-  emergencyContactPhone: z.string().trim().max(30).optional(),
+  emergencyContactPhone: optionalPhoneField,
   licenseNumber: z.string().trim().max(60).optional(),
   licenseExpiry: z.string().datetime().or(z.string().date()).optional(),
   experienceYears: z.coerce.number().min(0).max(60).optional(),

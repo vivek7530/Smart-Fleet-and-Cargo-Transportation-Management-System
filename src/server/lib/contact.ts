@@ -1,20 +1,17 @@
 import { z } from 'zod';
+import { isValidPhone, normalisePhone, optionalPhoneField, phoneField } from '../../lib/phone';
+
+export { PHONE_LENGTH, PHONE_MESSAGE, formatPhone } from '../../lib/phone';
 
 /**
- * Mobile numbers are normalised to E.164-ish form: an optional leading `+`
- * followed by 8–15 digits. Spaces, dashes and brackets are stripped.
+ * Mobile numbers follow one rule product-wide, defined in `src/lib/phone.ts`
+ * so the browser and the API can never disagree: exactly ten digits, stored
+ * bare, with `+91`, `0091` and a leading `0` all stripped on the way in.
+ *
+ * The `…Mobile` names are kept as the server's vocabulary for the same rule.
  */
-export function normaliseMobile(input: string): string {
-  const trimmed = input.trim();
-  const hasPlus = trimmed.startsWith('+');
-  const digits = trimmed.replace(/\D/g, '');
-  return hasPlus ? `+${digits}` : digits;
-}
-
-export function isValidMobile(input: string): boolean {
-  const normalised = normaliseMobile(input);
-  return /^\+?[0-9]{8,15}$/.test(normalised);
-}
+export const normaliseMobile = normalisePhone;
+export const isValidMobile = isValidPhone;
 
 export function normaliseEmail(input: string): string {
   return input.trim().toLowerCase();
@@ -27,12 +24,7 @@ export const emailField = z
   .email('Please enter a valid email address')
   .transform(normaliseEmail);
 
-export const mobileField = z
-  .string()
-  .trim()
-  .min(1, 'Mobile number is required')
-  .transform(normaliseMobile)
-  .refine(isValidMobile, 'Please enter a valid mobile number (8–15 digits)');
+export const mobileField = phoneField;
 
 /** Treats empty strings from HTML forms as "not provided". */
 export const optionalEmailField = z
@@ -40,10 +32,7 @@ export const optionalEmailField = z
   .optional()
   .transform((value) => (value ? value : undefined));
 
-export const optionalMobileField = z
-  .union([z.literal(''), mobileField])
-  .optional()
-  .transform((value) => (value ? value : undefined));
+export const optionalMobileField = optionalPhoneField;
 
 export const passwordField = z
   .string()

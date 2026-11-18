@@ -375,7 +375,7 @@ function CostFormDialog({
           <Input id="cost-date" type="date" invalid={Boolean(errors.date)} {...form.register('date')} />
         </FormField>
 
-        <FormField label="Vendor" htmlFor="cost-vendor">
+        <FormField label="Paid to" htmlFor="cost-vendor">
           <Input id="cost-vendor" placeholder="Highway authority" {...form.register('vendor')} />
         </FormField>
       </FormGrid>

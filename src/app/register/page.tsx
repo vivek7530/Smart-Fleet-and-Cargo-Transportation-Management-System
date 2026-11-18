@@ -11,11 +11,13 @@ import { AlertCircle, ArrowRight, Lock, MailCheck, ShieldCheck, SmartphoneNfc } 
 import { toast } from 'sonner';
 import { ApiError, api } from '@/lib/api';
 import { formatDate } from '@/lib/format';
+import { formatPhone, normalisePhone, optionalPhoneField } from '@/lib/phone';
 import type { InvitationSummary, SessionUser } from '@/lib/types';
 import { useAuth } from '@/components/auth-provider';
 import { AuthLayout } from '@/components/auth/auth-layout';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { PhoneInput } from '@/components/ui/phone-input';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { FormField } from '@/components/ui/form-field';
@@ -25,13 +27,7 @@ const registerSchema = z
   .object({
     name: z.string().trim().min(2, 'Enter your full name').max(120),
     email: z.union([z.literal(''), z.string().email('Enter a valid email address')]),
-    mobile: z.union([
-      z.literal(''),
-      z
-        .string()
-        .trim()
-        .regex(/^\+?[0-9\s-]{8,18}$/, 'Enter a valid mobile number'),
-    ]),
+    mobile: optionalPhoneField,
     password: z
       .string()
       .min(8, 'Password must be at least 8 characters long')
@@ -99,7 +95,7 @@ function RegisterForm({ token }: { token: string }) {
     form.reset({
       name: invitation.name,
       email: invitation.email ?? '',
-      mobile: invitation.mobile ?? '',
+      mobile: normalisePhone(invitation.mobile),
       password: '',
       confirmPassword: '',
       licenseNumber: '',
@@ -170,7 +166,7 @@ function RegisterForm({ token }: { token: string }) {
             <p className="font-medium">
               Invited by {lockedField === 'email' ? 'email' : 'mobile'} ·{' '}
               <span className="text-muted-foreground">
-                {lockedField === 'email' ? invitation.email : invitation.mobile}
+                {lockedField === 'email' ? invitation.email : formatPhone(invitation.mobile)}
               </span>
             </p>
             <p className="mt-0.5 text-muted-foreground">
@@ -230,13 +226,10 @@ function RegisterForm({ token }: { token: string }) {
           error={form.formState.errors.mobile?.message}
           hint={lockedField === 'email' ? 'Optional — add it now or later from your profile.' : undefined}
         >
-          <Input
+          <PhoneInput
             id="mobile"
-            type="tel"
-            autoComplete="tel"
             readOnly={lockedField === 'mobile'}
             disabled={lockedField === 'mobile'}
-            placeholder={lockedField === 'email' ? '+91XXXXXXXXXX' : undefined}
             invalid={Boolean(form.formState.errors.mobile)}
             {...form.register('mobile')}
           />

@@ -18,6 +18,7 @@ import { toast } from 'sonner';
 import { api, errorMessage } from '@/lib/api';
 import { cn, humanise } from '@/lib/utils';
 import { formatNumber } from '@/lib/format';
+import { formatPhone } from '@/lib/phone';
 import type {
   ManagerFleetDriver,
   ManagerFleetGroup,
@@ -257,7 +258,7 @@ function managerSubtitle(group: ManagerFleetGroup, extra?: React.ReactNode) {
       {manager.mobile ? (
         <span className="flex items-center gap-1">
           <Smartphone className="size-3 shrink-0" />
-          <span className="tabular">{manager.mobile}</span>
+          <span className="tabular">{formatPhone(manager.mobile)}</span>
         </span>
       ) : null}
       {extra}
@@ -785,7 +786,7 @@ function DriverTable({ drivers }: { drivers: ManagerFleetDriver[] }) {
                     <p className="truncate font-medium">{driver.name}</p>
                     <p className="flex items-center gap-1.5 truncate text-xs text-muted-foreground">
                       <Phone className="size-3 shrink-0" />
-                      <span className="tabular">{driver.mobile ?? driver.email ?? '—'}</span>
+                      <span className="tabular">{driver.mobile ? formatPhone(driver.mobile) : (driver.email ?? '—')}</span>
                     </p>
                   </div>
                 </div>

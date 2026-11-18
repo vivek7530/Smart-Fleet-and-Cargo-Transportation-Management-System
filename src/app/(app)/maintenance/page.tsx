@@ -576,7 +576,7 @@ function MaintenanceFormDialog({
           <Input id="maintenance-date" type="date" invalid={Boolean(errors.date)} {...form.register('date')} />
         </FormField>
 
-        <FormField label="Service provider" htmlFor="serviceProvider">
+        <FormField label="Garage or workshop" htmlFor="serviceProvider">
           <Input id="serviceProvider" placeholder="Tata Motors Authorised Service" {...form.register('serviceProvider')} />
         </FormField>
 

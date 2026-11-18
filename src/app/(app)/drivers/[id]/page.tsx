@@ -8,6 +8,7 @@ import { ArrowLeft, IdCard, Mail, Manager as ManagerIcon, Phone, Route, Truck as
 import { toast } from 'sonner';
 import { api, errorMessage } from '@/lib/api';
 import { formatCurrency, formatDate, formatNumber } from '@/lib/format';
+import { formatPhone } from '@/lib/phone';
 import { humanise } from '@/lib/utils';
 import type { Page, Trip, Truck, UserRecord } from '@/lib/types';
 import { PageHeader } from '@/components/data/list-toolbar';
@@ -81,7 +82,7 @@ export default function DriverDetailPage() {
             {driver.mobile ? (
               <span className="flex items-center gap-1.5 text-[13px] text-muted-foreground">
                 <Phone className="size-3.5" />
-                <span className="tabular">{driver.mobile}</span>
+                <span className="tabular">{formatPhone(driver.mobile)}</span>
               </span>
             ) : null}
             {driver.email ? (

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ROLES, USER_STATUSES } from '../../types/enums';
 import { optionalEmailField, optionalMobileField } from '../../lib/contact';
+import { optionalPhoneField } from '../../../lib/phone';
 import { objectId } from '../shared';
 import { listQuerySchema } from '../../lib/pagination';
 
@@ -57,7 +58,7 @@ export const updateUserSchema = z.object({
   licenseExpiry: z.string().datetime().or(z.string().date()).nullable().optional(),
   experienceYears: z.coerce.number().min(0).max(60).optional(),
   emergencyContactName: z.string().trim().max(120).optional(),
-  emergencyContactPhone: z.string().trim().max(30).optional(),
+  emergencyContactPhone: optionalPhoneField,
   /** DRIVER only. `null` detaches the driver from their current manager. */
   manager: objectId.nullable().optional(),
 });

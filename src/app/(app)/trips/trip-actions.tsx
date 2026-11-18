@@ -217,7 +217,7 @@ export function CompleteTripDialog({
         />
       </FormField>
 
-      <FormField label="Closing note" htmlFor="complete-note">
+      <FormField label="Delivery note" htmlFor="complete-note">
         <Textarea
           id="complete-note"
           rows={2}
@@ -287,7 +287,7 @@ export function CancelTripDialog({
           rows={3}
           value={reason}
           onChange={(event) => setReason(event.target.value)}
-          placeholder="Consignor withdrew the booking."
+          placeholder="The sender cancelled the booking."
           autoFocus
         />
       </FormField>

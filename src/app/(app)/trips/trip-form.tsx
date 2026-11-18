@@ -282,11 +282,11 @@ export function TripFormDialog({
           </FormField>
 
           <FormField
-            label="Freight revenue (₹)"
+            label="Freight amount (₹)"
             htmlFor="revenue"
             required
             error={errors.revenue?.message}
-            hint="The amount agreed with the consignor."
+            hint="What the sender agreed to pay for this trip."
           >
             <Input id="revenue" type="number" invalid={Boolean(errors.revenue)} {...form.register('revenue')} />
           </FormField>

@@ -4,34 +4,34 @@ export const MANAGERS = [
   {
     name: 'Priya Sharma',
     email: 'priya.sharma@cargoentry.dev',
-    mobile: '+919820114477',
+    mobile: '9820114477',
     designation: 'Operations Manager — West',
   },
   {
     name: 'Rahul Menon',
     email: 'rahul.menon@cargoentry.dev',
-    mobile: '+919845220913',
+    mobile: '9845220913',
     designation: 'Fleet Manager — South',
   },
   {
     name: 'Aisha Khan',
     email: 'aisha.khan@cargoentry.dev',
-    mobile: '+919711805562',
+    mobile: '9711805562',
     designation: 'Logistics Manager — North',
   },
 ];
 
 export const DRIVERS = [
-  { name: 'Ramesh Yadav', mobile: '+919822104561', licenseNumber: 'MH12 20180004561', experienceYears: 12 },
-  { name: 'Suresh Patil', mobile: '+919823117742', licenseNumber: 'MH14 20150011203', experienceYears: 9 },
-  { name: 'Gurpreet Singh', mobile: '+919872240118', licenseNumber: 'PB10 20170007745', experienceYears: 15 },
-  { name: 'Mohammed Irfan', mobile: '+919845331209', licenseNumber: 'KA05 20190003318', experienceYears: 6 },
-  { name: 'Deepak Rathore', mobile: '+919829440376', licenseNumber: 'RJ14 20160009982', experienceYears: 11 },
-  { name: 'Sanjay Verma', mobile: '+919811556420', licenseNumber: 'DL09 20140002217', experienceYears: 18 },
-  { name: 'Vikram Chauhan', mobile: '+919825663310', licenseNumber: 'GJ01 20200001194', experienceYears: 5 },
-  { name: 'Arun Nair', mobile: '+919846770285', licenseNumber: 'KL07 20180006603', experienceYears: 8 },
-  { name: 'Balbir Kaur', mobile: '+919878881146', licenseNumber: 'PB08 20190004472', experienceYears: 7 },
-  { name: 'Prakash Jadhav', mobile: '+919820993318', licenseNumber: 'MH04 20130008851', experienceYears: 20 },
+  { name: 'Ramesh Yadav', mobile: '9822104561', licenseNumber: 'MH12 20180004561', experienceYears: 12 },
+  { name: 'Suresh Patil', mobile: '9823117742', licenseNumber: 'MH14 20150011203', experienceYears: 9 },
+  { name: 'Gurpreet Singh', mobile: '9872240118', licenseNumber: 'PB10 20170007745', experienceYears: 15 },
+  { name: 'Mohammed Irfan', mobile: '9845331209', licenseNumber: 'KA05 20190003318', experienceYears: 6 },
+  { name: 'Deepak Rathore', mobile: '9829440376', licenseNumber: 'RJ14 20160009982', experienceYears: 11 },
+  { name: 'Sanjay Verma', mobile: '9811556420', licenseNumber: 'DL09 20140002217', experienceYears: 18 },
+  { name: 'Vikram Chauhan', mobile: '9825663310', licenseNumber: 'GJ01 20200001194', experienceYears: 5 },
+  { name: 'Arun Nair', mobile: '9846770285', licenseNumber: 'KL07 20180006603', experienceYears: 8 },
+  { name: 'Balbir Kaur', mobile: '9878881146', licenseNumber: 'PB08 20190004472', experienceYears: 7 },
+  { name: 'Prakash Jadhav', mobile: '9820993318', licenseNumber: 'MH04 20130008851', experienceYears: 20 },
 ];
 
 export const TRUCK_MODELS = [

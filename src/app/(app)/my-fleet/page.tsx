@@ -14,6 +14,7 @@ import {
 } from '@/components/icons';
 import { api } from '@/lib/api';
 import { formatDate, formatNumber } from '@/lib/format';
+import { formatPhone } from '@/lib/phone';
 import type { MyFleetDriver, MyFleetReport, MyFleetTrip, MyFleetTruck } from '@/lib/types';
 import { PageHeader } from '@/components/data/list-toolbar';
 import { Button } from '@/components/ui/button';
@@ -238,7 +239,7 @@ function DriversPanel({ drivers }: { drivers: MyFleetDriver[] }) {
                 <p className="truncate font-medium">{driver.name}</p>
                 <p className="flex items-center gap-1.5 truncate text-xs text-muted-foreground">
                   <Phone className="size-3 shrink-0" />
-                  <span className="tabular">{driver.mobile ?? driver.email ?? '—'}</span>
+                  <span className="tabular">{driver.mobile ? formatPhone(driver.mobile) : (driver.email ?? '—')}</span>
                 </p>
               </div>
             </div>

@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import { api, errorMessage } from '@/lib/api';
 import { formatCurrency, formatDate, formatWeight } from '@/lib/format';
 import { humanise } from '@/lib/utils';
+import { optionalPhoneField } from '@/lib/phone';
 import type { Cargo } from '@/lib/types';
 import { useInfiniteList } from '@/hooks/use-infinite-list';
 import { useListState } from '@/hooks/use-list-state';
@@ -21,6 +22,7 @@ import { ResourceDialog, useMutationErrors } from '@/components/data/resource-di
 import { FormField, FormGrid, FormSection } from '@/components/ui/form-field';
 import { Button } from '@/components/ui/button';
 import { Input, Textarea } from '@/components/ui/input';
+import { PhoneInput } from '@/components/ui/phone-input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { StatusBadge } from '@/components/ui/status-badge';
@@ -143,7 +145,7 @@ export default function CargoPage() {
     <div className="space-y-5">
       <PageHeader
         title="Shipments"
-        description="Consignments waiting to move and those already on the road."
+        description="Goods waiting to move and those already on the road."
         actions={
           <Button
             onClick={() => {
@@ -160,7 +162,7 @@ export default function CargoPage() {
       <ListToolbar
         search={list.search}
         onSearchChange={list.setSearch}
-        searchPlaceholder="Search by code, shipper, consignee or route…"
+        searchPlaceholder="Search by code, sender, receiver or route…"
         total={query.total}
         loadedCount={query.items.length}
         dateRange={{ ...list.dateRange, onChange: list.setDateRange }}
@@ -215,7 +217,7 @@ export default function CargoPage() {
         }}
         emptyIcon={<Package />}
         emptyTitle="No shipments registered"
-        emptyDescription="Register a consignment so it can be attached to a trip."
+        emptyDescription="Register goods so they can be attached to a trip."
         emptyAction={
           <Button
             onClick={() => {
@@ -283,10 +285,10 @@ const cargoSchema = z.object({
   weightTons: z.coerce.number({ invalid_type_error: 'Enter the weight' }).min(0.01, 'Weight must be greater than zero'),
   units: z.union([z.literal(''), z.coerce.number().int().min(0)]).optional(),
   declaredValue: z.union([z.literal(''), z.coerce.number().min(0)]).optional(),
-  shipperName: z.string().trim().min(2, 'Shipper name is required').max(160),
-  shipperContact: z.string().trim().max(60).optional(),
-  consigneeName: z.string().trim().min(2, 'Consignee name is required').max(160),
-  consigneeContact: z.string().trim().max(60).optional(),
+  shipperName: z.string().trim().min(2, "Enter the sender's name").max(160),
+  shipperContact: optionalPhoneField,
+  consigneeName: z.string().trim().min(2, "Enter the receiver's name").max(160),
+  consigneeContact: optionalPhoneField,
   origin: z.string().trim().min(2, 'Origin is required').max(160),
   destination: z.string().trim().min(2, 'Destination is required').max(160),
   handlingInstructions: z.string().trim().max(1000).optional(),
@@ -379,7 +381,7 @@ function CargoFormDialog({
       onOpenChange={onOpenChange}
       size="lg"
       title={isEdit ? `Edit ${cargo!.cargoCode}` : 'Register shipment'}
-      description={isEdit ? 'Update the consignment details.' : 'Record a consignment so it can be assigned to a trip.'}
+      description={isEdit ? 'Update the shipment details.' : 'Record the goods so they can be assigned to a trip.'}
       submitLabel={isEdit ? 'Save changes' : 'Register shipment'}
       loading={mutation.isPending}
       error={bannerError}
@@ -388,7 +390,7 @@ function CargoFormDialog({
         mutation.mutate(values);
       })}
     >
-      <FormSection title="Consignment">
+      <FormSection title="Goods">
         <FormField label="Description" htmlFor="description" required error={errors.description?.message}>
           <Input
             id="description"
@@ -424,11 +426,11 @@ function CargoFormDialog({
             />
           </FormField>
 
-          <FormField label="Units / packages" htmlFor="units">
+          <FormField label="Number of packages" htmlFor="units">
             <Input id="units" type="number" {...form.register('units')} />
           </FormField>
 
-          <FormField label="Declared value (₹)" htmlFor="declaredValue">
+          <FormField label="Value of goods (₹)" htmlFor="declaredValue">
             <Input id="declaredValue" type="number" {...form.register('declaredValue')} />
           </FormField>
         </FormGrid>
@@ -452,21 +454,51 @@ function CargoFormDialog({
 
       <FormSection title="Parties">
         <FormGrid>
-          <FormField label="Shipper" htmlFor="shipperName" required error={errors.shipperName?.message}>
-            <Input id="shipperName" invalid={Boolean(errors.shipperName)} {...form.register('shipperName')} />
+          <FormField
+            label="Sender"
+            htmlFor="shipperName"
+            required
+            hint="Who hands the goods over at pickup."
+            error={errors.shipperName?.message}
+          >
+            <Input
+              id="shipperName"
+              placeholder="Shree Traders Pvt Ltd"
+              invalid={Boolean(errors.shipperName)}
+              {...form.register('shipperName')}
+            />
           </FormField>
-          <FormField label="Shipper contact" htmlFor="shipperContact">
-            <Input id="shipperContact" placeholder="+91XXXXXXXXXX" {...form.register('shipperContact')} />
+          <FormField label="Sender contact" htmlFor="shipperContact" error={errors.shipperContact?.message}>
+            <PhoneInput
+              id="shipperContact"
+              invalid={Boolean(errors.shipperContact)}
+              {...form.register('shipperContact')}
+            />
           </FormField>
-          <FormField label="Consignee" htmlFor="consigneeName" required error={errors.consigneeName?.message}>
-            <Input id="consigneeName" invalid={Boolean(errors.consigneeName)} {...form.register('consigneeName')} />
+          <FormField
+            label="Receiver"
+            htmlFor="consigneeName"
+            required
+            hint="Who the goods are delivered to."
+            error={errors.consigneeName?.message}
+          >
+            <Input
+              id="consigneeName"
+              placeholder="Gupta Distributors"
+              invalid={Boolean(errors.consigneeName)}
+              {...form.register('consigneeName')}
+            />
           </FormField>
-          <FormField label="Consignee contact" htmlFor="consigneeContact">
-            <Input id="consigneeContact" placeholder="+91XXXXXXXXXX" {...form.register('consigneeContact')} />
+          <FormField label="Receiver contact" htmlFor="consigneeContact" error={errors.consigneeContact?.message}>
+            <PhoneInput
+              id="consigneeContact"
+              invalid={Boolean(errors.consigneeContact)}
+              {...form.register('consigneeContact')}
+            />
           </FormField>
         </FormGrid>
 
-        <FormField label="Handling instructions" htmlFor="handlingInstructions">
+        <FormField label="Special instructions" htmlFor="handlingInstructions">
           <Textarea
             id="handlingInstructions"
             rows={2}

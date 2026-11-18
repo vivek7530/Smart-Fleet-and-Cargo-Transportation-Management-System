@@ -349,9 +349,9 @@ async function seed() {
         units: int(20, 640),
         declaredValue: money(template.value[0], template.value[1]),
         shipperName: pick(SHIPPERS),
-        shipperContact: `+9198${int(10000000, 99999999)}`,
+        shipperContact: `98${int(10000000, 99999999)}`,
         consigneeName: pick(CONSIGNEES),
-        consigneeContact: `+9197${int(10000000, 99999999)}`,
+        consigneeContact: `97${int(10000000, 99999999)}`,
         origin: route.from,
         destination: route.to,
         status: cargoStatusFor(step.status),
@@ -726,7 +726,7 @@ async function seed() {
 async function createPendingInvitations(adminId: Types.ObjectId) {
   const specs = [
     { name: 'Neha Bhatt', email: 'neha.bhatt@cargoentry.dev', mobile: null, role: 'MANAGER', channel: 'EMAIL' as const },
-    { name: 'Imran Sheikh', email: null, mobile: '+919833440021', role: 'DRIVER', channel: 'MOBILE' as const },
+    { name: 'Imran Sheikh', email: null, mobile: '9833440021', role: 'DRIVER', channel: 'MOBILE' as const },
   ];
 
   const links: { name: string; role: string; channel: string; link: string }[] = [];
