@@ -11,3 +11,6 @@ next-env.d.ts
 
 # Local database backups (contain password hashes)
 backups/
+
+# Git Bash crash dumps, left behind when the shell runs out of processes.
+*.stackdump
