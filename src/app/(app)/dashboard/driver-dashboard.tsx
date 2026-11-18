@@ -70,7 +70,7 @@ export function DriverDashboardView({ data }: { data: DriverDashboard }) {
               <MiniStat label="Started" value={formatDate(activeTrip.startedAt ?? activeTrip.startDate)} />
               <MiniStat label="Due" value={formatDate(activeTrip.expectedDeliveryDate)} />
               <MiniStat
-                label="Cargo"
+                label="Shipment"
                 value={
                   activeTrip.cargo?.length
                     ? formatWeight(activeTrip.cargo.reduce((sum, item) => sum + item.weightTons, 0))

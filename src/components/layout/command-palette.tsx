@@ -60,7 +60,7 @@ export function CommandPalette({ open, onOpenChange, role }: CommandPaletteProps
             <Command.Input
               value={query}
               onValueChange={setQuery}
-              placeholder="Search trips, trucks, cargo, drivers or jump to a page…"
+              placeholder="Search trips, trucks, shipments, drivers or jump to a page…"
               className="h-12 w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
             />
             {isFetching ? <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" /> : null}
@@ -115,7 +115,7 @@ export function CommandPalette({ open, onOpenChange, role }: CommandPaletteProps
             ) : null}
 
             {data?.cargo.length ? (
-              <CommandGroup heading="Cargo">
+              <CommandGroup heading="Shipments">
                 {data.cargo.map((item) => (
                   <CommandItem key={item.id} onSelect={() => go(`/cargo?search=${item.cargoCode}`)}>
                     <Package className="size-4 text-muted-foreground" />

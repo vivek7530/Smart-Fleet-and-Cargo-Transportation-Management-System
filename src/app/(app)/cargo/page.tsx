@@ -51,16 +51,16 @@ export default function CargoPage() {
     mutationFn: (id: string) => api.delete(`/cargo/${id}`),
     onSuccess() {
       queryClient.invalidateQueries({ queryKey: ['/cargo'] });
-      toast.success(`Cargo ${deleting?.cargoCode} deleted`);
+      toast.success(`Shipment ${deleting?.cargoCode} deleted`);
       setDeleting(null);
     },
-    onError: (error) => toast.error(errorMessage(error, 'Could not delete this cargo record.')),
+    onError: (error) => toast.error(errorMessage(error, 'Could not delete this shipment.')),
   });
 
   const columns: Column<Cargo>[] = [
     {
       key: 'cargo',
-      header: 'Cargo',
+      header: 'Shipment',
       width: 'minmax(220px, 1.8fr)',
       sortKey: 'cargoCode',
       render: (cargo) => (
@@ -134,7 +134,7 @@ export default function CargoPage() {
   return (
     <div className="space-y-5">
       <PageHeader
-        title="Cargo"
+        title="Shipments"
         description="Consignments waiting to move and those already on the road."
         actions={
           <Button
@@ -167,7 +167,7 @@ export default function CargoPage() {
           },
           {
             key: 'type',
-            label: 'Cargo type',
+            label: 'Shipment type',
             value: list.filters.type ?? 'ALL',
             options: optionsFrom(CARGO_TYPES as unknown as string[], 'All types'),
             onChange: (value) => list.setFilter('type', value),
@@ -177,7 +177,7 @@ export default function CargoPage() {
             label: 'Assignment',
             value: list.filters.unassigned ?? 'ALL',
             options: [
-              { label: 'All cargo', value: 'ALL' },
+              { label: 'All types', value: 'ALL' },
               { label: 'Not on a trip', value: 'true' },
             ],
             onChange: (value) => list.setFilter('unassigned', value),
@@ -205,7 +205,7 @@ export default function CargoPage() {
           setFormOpen(true);
         }}
         emptyIcon={<Package />}
-        emptyTitle="No cargo registered"
+        emptyTitle="No shipments registered"
         emptyDescription="Register a consignment so it can be attached to a trip."
         emptyAction={
           <Button
@@ -234,7 +234,7 @@ export default function CargoPage() {
           <RowActions
             actions={[
               {
-                label: 'Edit cargo',
+                label: 'Edit shipment',
                 icon: <Pencil />,
                 onSelect: () => {
                   setEditing(cargo);
@@ -258,9 +258,9 @@ export default function CargoPage() {
       <ConfirmDialog
         open={Boolean(deleting)}
         onOpenChange={(open) => !open && setDeleting(null)}
-        title={`Delete cargo ${deleting?.cargoCode}?`}
-        description="Cargo already loaded or in transit cannot be deleted."
-        confirmLabel="Delete cargo"
+        title={`Delete shipment ${deleting?.cargoCode}?`}
+        description="A shipment already loaded or in transit cannot be deleted."
+        confirmLabel="Delete shipment"
         loading={remove.isPending}
         onConfirm={() => deleting && remove.mutate(deleting.id)}
       />
@@ -269,7 +269,7 @@ export default function CargoPage() {
 }
 
 const cargoSchema = z.object({
-  description: z.string().trim().min(3, 'Describe the cargo').max(500),
+  description: z.string().trim().min(3, 'Describe the shipment').max(500),
   type: z.enum(CARGO_TYPES),
   weightTons: z.coerce.number({ invalid_type_error: 'Enter the weight' }).min(0.01, 'Weight must be greater than zero'),
   units: z.union([z.literal(''), z.coerce.number().int().min(0)]).optional(),
@@ -356,7 +356,7 @@ function CargoFormDialog({
     onSuccess(result) {
       queryClient.invalidateQueries({ queryKey: ['/cargo'] });
       queryClient.invalidateQueries({ queryKey: ['cargo', 'picker'] });
-      toast.success(isEdit ? `Cargo ${result.cargo.cargoCode} updated` : `Cargo ${result.cargo.cargoCode} registered`);
+      toast.success(isEdit ? `Shipment ${result.cargo.cargoCode} updated` : `Shipment ${result.cargo.cargoCode} registered`);
       onOpenChange(false);
     },
     onError: handleError,
@@ -369,9 +369,9 @@ function CargoFormDialog({
       open={open}
       onOpenChange={onOpenChange}
       size="lg"
-      title={isEdit ? `Edit ${cargo!.cargoCode}` : 'Register cargo'}
+      title={isEdit ? `Edit ${cargo!.cargoCode}` : 'Register shipment'}
       description={isEdit ? 'Update the consignment details.' : 'Record a consignment so it can be assigned to a trip.'}
-      submitLabel={isEdit ? 'Save changes' : 'Register cargo'}
+      submitLabel={isEdit ? 'Save changes' : 'Register shipment'}
       loading={mutation.isPending}
       error={bannerError}
       onSubmit={form.handleSubmit((values) => {
@@ -390,7 +390,7 @@ function CargoFormDialog({
         </FormField>
 
         <FormGrid>
-          <FormField label="Cargo type" error={errors.type?.message}>
+          <FormField label="Shipment type" error={errors.type?.message}>
             <Select value={form.watch('type')} onValueChange={(value) => form.setValue('type', value as CargoValues['type'])}>
               <SelectTrigger>
                 <SelectValue />

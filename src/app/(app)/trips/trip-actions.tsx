@@ -127,7 +127,7 @@ export function StartTripDialog({
           rows={2}
           value={note}
           onChange={(event) => setNote(event.target.value)}
-          placeholder="Departed depot at 06:30, cargo sealed."
+          placeholder="Departed depot at 06:30, shipment sealed."
         />
       </FormField>
     </ResourceDialog>
@@ -263,7 +263,7 @@ export function CancelTripDialog({
       open={Boolean(trip)}
       onOpenChange={onOpenChange}
       title={`Cancel trip ${trip?.tripCode ?? ''}`}
-      description="The driver is notified and any attached cargo is released."
+      description="The driver is notified and any attached shipments are released."
       submitLabel="Cancel trip"
       submitVariant="destructive"
       cancelLabel="Keep trip"

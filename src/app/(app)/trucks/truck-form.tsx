@@ -10,6 +10,7 @@ import { api } from '@/lib/api';
 import { toDateInput } from '@/lib/format';
 import { humanise } from '@/lib/utils';
 import type { Page, Truck, UserRecord } from '@/lib/types';
+import { useAuth } from '@/components/auth-provider';
 import { ResourceDialog, useMutationErrors } from '@/components/data/resource-dialog';
 import { FormField, FormGrid, FormSection } from '@/components/ui/form-field';
 import { Input, Textarea } from '@/components/ui/input';
@@ -34,6 +35,7 @@ const truckSchema = z.object({
     .max(200),
   fuelType: z.enum(FUEL_TYPES),
   status: z.enum(TRUCK_STATUSES),
+  owner: z.string().optional(),
   assignedDriver: z.string().optional(),
   odometerKm: z.coerce.number().min(0, 'Odometer cannot be negative').multipleOf(0.1).optional(),
   mileageKmPerLitre: z.union([z.literal(''), z.coerce.number().min(0).max(100)]).optional(),
@@ -60,6 +62,7 @@ const emptyValues: TruckValues = {
   capacityTons: 20,
   fuelType: 'DIESEL',
   status: 'AVAILABLE',
+  owner: 'NONE',
   assignedDriver: 'NONE',
   odometerKm: 0,
   mileageKmPerLitre: '',
@@ -86,17 +89,41 @@ export function TruckFormDialog({
 }) {
   const queryClient = useQueryClient();
   const isEdit = Boolean(truck);
+  const { user } = useAuth();
+  // A manager's own trucks are theirs by definition — the field only means
+  // something to an administrator, who is choosing on someone else's behalf.
+  const isAdmin = user?.role === 'ADMIN';
 
   const form = useForm<TruckValues>({ resolver: zodResolver(truckSchema), defaultValues: emptyValues });
   const { bannerError, setBannerError, handleError } = useMutationErrors<keyof TruckValues>((field, message) =>
     form.setError(field, { message }),
   );
 
-  // Only active drivers can hold a truck, so the picker asks for exactly those.
+  const owner = form.watch('owner');
+
+  const { data: managers } = useQuery({
+    queryKey: ['users', 'manager-picker'],
+    queryFn: () => api.get<Page<UserRecord>>('/users', { role: 'MANAGER', status: 'ACTIVE', limit: 100 }),
+    enabled: open && isAdmin,
+    staleTime: 60_000,
+  });
+
+  /**
+   * Only active drivers can hold a truck, and only drivers on the owning
+   * manager's roster — the server rejects anyone else, so the picker is
+   * narrowed to the same set rather than offering a choice that will fail.
+   */
   const { data: drivers } = useQuery({
-    queryKey: ['drivers', 'picker'],
-    queryFn: () => api.get<Page<UserRecord>>('/drivers', { limit: 100, status: 'ACTIVE' }),
-    enabled: open,
+    queryKey: ['drivers', 'picker', isAdmin ? owner : 'mine'],
+    queryFn: () =>
+      api.get<Page<UserRecord>>('/drivers', {
+        limit: 100,
+        status: 'ACTIVE',
+        ...(isAdmin && owner && owner !== 'NONE' ? { manager: owner } : {}),
+      }),
+    // With no owner chosen there is no roster to choose from, and the server
+    // would refuse a driver anyway.
+    enabled: open && (!isAdmin || (Boolean(owner) && owner !== 'NONE')),
     staleTime: 60_000,
   });
 
@@ -114,6 +141,7 @@ export function TruckFormDialog({
             capacityTons: truck.capacityTons,
             fuelType: truck.fuelType,
             status: truck.status,
+            owner: truck.owner?.id ?? 'NONE',
             assignedDriver: truck.assignedDriver?.id ?? 'NONE',
             odometerKm: truck.odometerKm,
             mileageKmPerLitre: truck.mileageKmPerLitre ?? '',
@@ -137,6 +165,8 @@ export function TruckFormDialog({
       const payload = {
         ...values,
         assignedDriver: values.assignedDriver === 'NONE' ? null : values.assignedDriver,
+        // A manager never sends this; the server assigns them as the owner.
+        owner: isAdmin ? (values.owner === 'NONE' ? null : values.owner) : undefined,
         mileageKmPerLitre: values.mileageKmPerLitre === '' ? undefined : values.mileageKmPerLitre,
         purchasePrice: values.purchasePrice === '' ? undefined : values.purchasePrice,
         // Empty date inputs must be sent as null, not "".
@@ -266,10 +296,48 @@ export function TruckFormDialog({
             </Select>
           </FormField>
 
-          <FormField label="Assigned driver" hint="A driver can hold one truck at a time.">
+          {isAdmin ? (
+            <FormField
+              label="Manager"
+              hint="Who is responsible for this truck. Only they, and you, will see it."
+            >
+              <Select
+                value={owner || 'NONE'}
+                onValueChange={(value) => {
+                  form.setValue('owner', value);
+                  // The old driver belongs to the old manager's roster, so the
+                  // server would refuse them — clear it rather than let the
+                  // form carry a choice that cannot be saved.
+                  form.setValue('assignedDriver', 'NONE');
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="No manager yet" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="NONE">No manager yet</SelectItem>
+                  {managers?.items.map((manager) => (
+                    <SelectItem key={manager.id} value={manager.id}>
+                      {manager.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </FormField>
+          ) : null}
+
+          <FormField
+            label="Assigned driver"
+            hint={
+              isAdmin && (!owner || owner === 'NONE')
+                ? 'Choose a manager first — a driver comes from their roster.'
+                : 'A driver can hold one truck at a time.'
+            }
+          >
             <Select
               value={form.watch('assignedDriver') || 'NONE'}
               onValueChange={(value) => form.setValue('assignedDriver', value)}
+              disabled={isAdmin && (!owner || owner === 'NONE')}
             >
               <SelectTrigger>
                 <SelectValue placeholder="No driver" />

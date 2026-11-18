@@ -278,7 +278,7 @@ export function TripsView({ title, description }: { title: string; description: 
             open={Boolean(deleting)}
             onOpenChange={(open) => !open && setDeleting(null)}
             title={`Delete trip ${deleting?.tripCode}?`}
-            description="This permanently removes the trip and releases its cargo. Only planned or cancelled trips can be deleted."
+            description="This permanently removes the trip and releases its shipments. Only planned or cancelled trips can be deleted."
             confirmLabel="Delete trip"
             loading={remove.isPending}
             onConfirm={() => deleting && remove.mutate(deleting.id)}

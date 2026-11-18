@@ -70,7 +70,7 @@ export const NAV_SECTIONS: NavSection[] = [
         roles: ['MANAGER'],
         description: 'Your trucks, drivers and live trips',
       },
-      { label: 'Cargo', href: '/cargo', icon: Package, roles: STAFF, description: 'Consignments and shipments' },
+      { label: 'Shipments', href: '/cargo', icon: Package, roles: STAFF, description: 'Consignments waiting to move and those on the road' },
       { label: 'Drivers', href: '/drivers', icon: Steering, roles: STAFF, description: 'Driver roster' },
     ],
   },

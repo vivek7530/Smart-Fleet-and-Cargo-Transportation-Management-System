@@ -249,7 +249,7 @@ export default function TripDetailPage() {
               <TabsList>
                 <TabsTrigger value="cargo">
                   <Package />
-                  Cargo
+                  Shipments
                 </TabsTrigger>
                 <TabsTrigger value="expenses">
                   <BadgeIndianRupee />
@@ -273,7 +273,7 @@ export default function TripDetailPage() {
 
               <TabsContent value="cargo" className="mt-4">
                 {!trip.cargo?.length ? (
-                  <EmptyState compact icon={<Package />} title="No cargo attached to this trip" />
+                  <EmptyState compact icon={<Package />} title="No shipments attached to this trip" />
                 ) : (
                   <ul className="divide-y divide-border/70">
                     {trip.cargo.map((item) => (

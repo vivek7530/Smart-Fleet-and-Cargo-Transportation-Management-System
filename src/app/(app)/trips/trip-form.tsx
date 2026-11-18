@@ -284,7 +284,7 @@ export function TripFormDialog({
         </FormGrid>
       </FormSection>
 
-      <FormSection title="Cargo" description="Pick the consignments travelling on this trip.">
+      <FormSection title="Shipments" description="Pick the shipments travelling on this trip.">
         {!cargoOptions?.length ? (
           <p className="rounded-lg border border-dashed px-4 py-6 text-center text-[13px] text-muted-foreground">
             No unassigned cargo available. Register cargo first, then attach it here.
@@ -324,7 +324,7 @@ export function TripFormDialog({
         {selectedCargo.length > 0 ? (
           <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <Package className="size-3.5" />
-            {selectedCargo.length} consignment{selectedCargo.length === 1 ? '' : 's'} selected
+            {selectedCargo.length} shipment{selectedCargo.length === 1 ? '' : 's'} selected
           </p>
         ) : null}
       </FormSection>
