@@ -26,6 +26,7 @@ import { recordAudit } from '../../services/audit.service';
 import { notify } from '../../services/notification.service';
 import { recipientsForTruck } from '../../services/ownership.service';
 import { TRIP_TRANSITIONS, type TripStatus } from '../../types/enums';
+import { indiaDayLabel, staleReasonFor, staleTripFilter } from '../../lib/stale-trips';
 import { advanceTruckOdometer } from '../../services/odometer.service';
 import {
   assertCanEdit,
@@ -55,6 +56,8 @@ type TripListQuery = ListQuery & {
   truck?: string;
   manager?: string;
   active?: boolean;
+  /** Only the trips the dispatch gate is holding — see `lib/stale-trips`. */
+  stale?: boolean;
 };
 
 /**
@@ -76,6 +79,7 @@ export async function listTrips(query: TripListQuery, user: UserDocument) {
     tripScopeFor(user),
     query.status ? { status: query.status } : null,
     query.active ? { status: { $in: ACTIVE_STATUSES } } : null,
+    query.stale ? staleTripFilter() : null,
     query.driver && user.role !== 'DRIVER' ? { driver: query.driver } : null,
     query.truck ? { truck: query.truck } : null,
     // A trip carries its truck's owner, so this is one indexed predicate rather
@@ -306,6 +310,13 @@ export async function updateTrip(id: string, input: Record<string, unknown>, ctx
   const previousDriver = trip.driver ? String(trip.driver) : null;
   const previousTruck = trip.truck ? String(trip.truck) : null;
 
+  // Editing a stale trip is the very thing the dispatch gate asks for, so the
+  // gate stands aside for it. Otherwise a resource carrying two stale trips
+  // would be stuck: each one would be refused on account of the other, and
+  // cancelling would be the only way out. The overlap check below still
+  // applies — this only waives the "settle the backlog first" rule.
+  const settlingStaleTrip = staleReasonFor(trip) !== null;
+
   const proposedStart = input.startDate ? new Date(input.startDate as string) : trip.startDate;
   const proposedEnd = input.expectedDeliveryDate ? new Date(input.expectedDeliveryDate as string) : trip.expectedDeliveryDate;
   if (proposedEnd < proposedStart) throw ApiError.validation('Expected delivery must be on or after the start date');
@@ -316,7 +327,7 @@ export async function updateTrip(id: string, input: Record<string, unknown>, ctx
   // follows the truck, exactly as it does on a transfer.
   let movedToTruck: Awaited<ReturnType<typeof assertTruckUsable>> | null = null;
   if (proposedTruck && (proposedTruck !== previousTruck || input.startDate || input.expectedDeliveryDate)) {
-    movedToTruck = await assertTruckUsable(proposedTruck, proposedStart, proposedEnd, String(trip._id), actor);
+    movedToTruck = await assertTruckUsable(proposedTruck, proposedStart, proposedEnd, String(trip._id), actor, settlingStaleTrip);
   }
   // The trip's owner follows its truck, exactly as it does on a transfer.
   if (movedToTruck && proposedTruck !== previousTruck) {
@@ -324,7 +335,7 @@ export async function updateTrip(id: string, input: Record<string, unknown>, ctx
     trip.sharedWith = movedToTruck.sharedWith ?? [];
   }
   if (proposedDriver && (proposedDriver !== previousDriver || input.startDate || input.expectedDeliveryDate)) {
-    await assertDriverUsable(proposedDriver, proposedStart, proposedEnd, String(trip._id), trip.owner ?? null);
+    await assertDriverUsable(proposedDriver, proposedStart, proposedEnd, String(trip._id), trip.owner ?? null, settlingStaleTrip);
   }
 
   if (Array.isArray(input.cargo)) {
@@ -783,6 +794,7 @@ async function assertTruckUsable(
   end: Date,
   excludeTripId: string | undefined,
   actor: UserDocument,
+  settlingStaleTrip = false,
 ) {
   const truck = await Truck.findById(truckId);
   if (!truck) throw ApiError.badRequest('The selected truck could not be found');
@@ -803,6 +815,7 @@ async function assertTruckUsable(
   if (unsafeBreakdown) throw ApiError.conflict(`Truck ${truck.truckNumber} has an unresolved high-severity breakdown`);
 
   await assertResourceHasNoTripOverlap('truck', truckId, start, end, excludeTripId, truck.truckNumber);
+  if (!settlingStaleTrip) await assertResourceHasNoStaleTrip('truck', truckId, excludeTripId, truck.truckNumber);
   await assertNoMaintenanceOverlap(truckId, start, end, truck.truckNumber);
   return truck;
 }
@@ -818,6 +831,7 @@ async function assertDriverUsable(
   end: Date,
   excludeTripId: string | undefined,
   expectedOwner: unknown,
+  settlingStaleTrip = false,
 ) {
   const driver = await User.findOne({ _id: driverId, role: 'DRIVER' });
   if (!driver) throw ApiError.badRequest('The selected driver could not be found');
@@ -828,9 +842,20 @@ async function assertDriverUsable(
     throw ApiError.badRequest('The selected driver could not be found');
   }
   await assertResourceHasNoTripOverlap('driver', driverId, start, end, excludeTripId, driver.name);
+  if (!settlingStaleTrip) await assertResourceHasNoStaleTrip('driver', driverId, excludeTripId, driver.name);
   return driver;
 }
 
+/** `Truck GJ33B1111` / `Driver Asha` — how a resource is named in an error. */
+function resourceLabel(field: 'truck' | 'driver', label: string) {
+  return `${field === 'truck' ? 'Truck' : 'Driver'} ${label}`;
+}
+
+/**
+ * Does the requested window collide with a trip this resource is already
+ * committed to? That question and nothing else — a trip that is merely
+ * unsettled is a separate matter, asked by `assertResourceHasNoStaleTrip`.
+ */
 async function assertResourceHasNoTripOverlap(
   field: 'truck' | 'driver', id: string, start: Date, end: Date, excludeTripId: string | undefined, label: string,
 ) {
@@ -838,30 +863,43 @@ async function assertResourceHasNoTripOverlap(
     [field]: id,
     status: { $in: ['PLANNED', 'ASSIGNED', 'LOADING', 'IN_TRANSIT', 'DELIVERED'] },
     startDate: { $lte: end },
-    $or: [
-      { $expr: { $gte: [{ $ifNull: ['$actualDeliveryDate', '$expectedDeliveryDate'] }, start] } },
-      {
-        status: 'IN_TRANSIT',
-        $expr: {
-          $lt: [
-            { $dateToString: { date: '$expectedDeliveryDate', format: '%Y-%m-%d', timezone: 'Asia/Kolkata' } },
-            indiaDateKey(new Date()),
-          ],
-        },
-      },
-      {
-        status: { $in: ['PLANNED', 'ASSIGNED', 'LOADING'] },
-        $expr: {
-          $lt: [
-            { $dateToString: { date: '$startDate', format: '%Y-%m-%d', timezone: 'Asia/Kolkata' } },
-            indiaDateKey(new Date()),
-          ],
-        },
-      },
-    ],
+    $expr: { $gte: [{ $ifNull: ['$actualDeliveryDate', '$expectedDeliveryDate'] }, start] },
     ...(excludeTripId ? { _id: { $ne: excludeTripId } } : {}),
   }).select('_id tripCode');
-  if (conflict) throw ApiError.conflict(`${field === 'truck' ? 'Truck' : 'Driver'} ${label} is reserved during this trip window (${conflict.tripCode})`);
+  if (conflict) {
+    throw ApiError.conflict(
+      `${resourceLabel(field, label)} is already booked for ${conflict.tripCode} during this window`,
+    );
+  }
+}
+
+/**
+ * A gate, not an overlap check. A trip that is overdue on the road, or that was
+ * due to leave on a past date and never did, leaves the resource unaccounted
+ * for: nobody can say where it is or when it comes free. Booking over it turns
+ * into a real double-booking the moment someone picks that trip back up, so the
+ * stale trip has to be settled first — rescheduled, closed or cancelled.
+ *
+ * It ignores the requested window on purpose, because the window is not the
+ * problem. Folding this into the overlap query above is what used to make the
+ * system report a clash between two trips whose dates never touched, and leave
+ * the dispatcher with no way to tell which trip to go and fix.
+ */
+async function assertResourceHasNoStaleTrip(
+  field: 'truck' | 'driver', id: string, excludeTripId: string | undefined, label: string,
+) {
+  const stale = await Trip.findOne({
+    [field]: id,
+    ...staleTripFilter(),
+    ...(excludeTripId ? { _id: { $ne: excludeTripId } } : {}),
+  }).select('tripCode status startDate expectedDeliveryDate');
+  if (!stale) return;
+
+  throw ApiError.conflict(
+    stale.status === 'IN_TRANSIT'
+      ? `${resourceLabel(field, label)} is still out on ${stale.tripCode}, which was due back on ${indiaDayLabel(stale.expectedDeliveryDate)}. Close that trip before booking a new one.`
+      : `${resourceLabel(field, label)} is still held by ${stale.tripCode}, which was due to start on ${indiaDayLabel(stale.startDate)} and never left. Reschedule, complete or cancel it first.`,
+  );
 }
 
 async function assertHistoricalResourceAvailable(field: 'truck' | 'driver', id: string, start: Date, end: Date, label: string) {

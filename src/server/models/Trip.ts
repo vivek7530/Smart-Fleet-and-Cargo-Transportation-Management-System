@@ -1,6 +1,7 @@
 import { Schema, model, models, type Document, type Model, type Types } from 'mongoose';
 import { TRIP_STATUSES, type TripStatus } from '../types/enums';
 import { shareSchema, type ShareEntry } from './share.schema';
+import { staleReasonFor } from '../lib/stale-trips';
 
 export interface TripStatusEvent {
   status: TripStatus;
@@ -72,6 +73,7 @@ export interface TripDocument extends Document {
   totalExpenses: number;
   profit: number;
   startOverdue: boolean;
+  deliveryOverdue: boolean;
 }
 
 const statusEventSchema = new Schema<TripStatusEvent>(
@@ -151,11 +153,16 @@ tripSchema.virtual('profit').get(function (this: TripDocument) {
   return (this.revenue ?? 0) - ((this.transportationCost ?? 0) + (this.driverExpenseTotal ?? 0) + (this.fuelCost ?? 0));
 });
 
+// Both halves of the same rule — see `lib/stale-trips`. A trip that was due to
+// leave and never did, and one that went out and never came back, are the two
+// ways the fleet loses track of a truck and driver, and the dispatch gate
+// refuses new work on either.
 tripSchema.virtual('startOverdue').get(function (this: TripDocument) {
-  if (!['PLANNED', 'ASSIGNED', 'LOADING'].includes(this.status)) return false;
-  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
-  const startDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(this.startDate);
-  return startDate < today;
+  return staleReasonFor(this) === 'NEVER_LEFT';
+});
+
+tripSchema.virtual('deliveryOverdue').get(function (this: TripDocument) {
+  return staleReasonFor(this) === 'OVERDUE_RETURN';
 });
 
 tripSchema.index({ status: 1, startDate: -1 });

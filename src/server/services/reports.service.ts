@@ -11,6 +11,7 @@ import { DocumentRecord } from '../models/DocumentRecord';
 import { BreakdownReport } from '../models/BreakdownReport';
 import { accessibleTruckIds } from './ownership.service';
 import { ownerScopeFor } from '../lib/ownership';
+import { staleTripFilter } from '../lib/stale-trips';
 
 export type Granularity = 'day' | 'week' | 'month';
 
@@ -388,7 +389,7 @@ export async function buildDashboard(user: UserDocument, range: DateRange) {
     fleet,
     driverCounts,
     tripCounts,
-    overdueStarts,
+    staleTrips,
     tripsInRange,
     previousTrips,
     financialPeriods,
@@ -409,11 +410,9 @@ export async function buildDashboard(user: UserDocument, range: DateRange) {
       { $match: tripScope },
       { $group: { _id: '$status', count: { $sum: 1 } } },
     ]),
-    Trip.countDocuments({
-      ...tripScope,
-      status: { $in: ['PLANNED', 'ASSIGNED', 'LOADING'] },
-      startDate: { $lt: resolveRange('today').from },
-    }),
+    // The same rule the dispatch gate enforces, so the number on the dashboard
+    // and the trips behind `/trips?stale=true` are always the same set.
+    Trip.countDocuments({ ...tripScope, ...staleTripFilter() }),
     Trip.countDocuments({ ...tripScope, startDate: { $gte: range.from, $lte: range.to } }),
     Trip.countDocuments({ ...tripScope, startDate: { $gte: previous.from, $lte: previous.to } }),
     financialsForPeriods(range, previous, pickGranularity(range), { tripScope, truckScope, byTrip }),
@@ -455,7 +454,7 @@ export async function buildDashboard(user: UserDocument, range: DateRange) {
       plannedTrips: byTripStatus.PLANNED ?? 0,
       completedTrips: byTripStatus.COMPLETED ?? 0,
       cancelledTrips: byTripStatus.CANCELLED ?? 0,
-      overdueStarts,
+      staleTrips,
       tripsInRange,
       ...financials,
       pendingExpenseCount: pendingExpenses[0]?.count ?? 0,

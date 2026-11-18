@@ -24,6 +24,29 @@ import { CancelTripDialog } from './trip-actions';
 
 const TRIP_STATUSES = ['PLANNED', 'ASSIGNED', 'LOADING', 'IN_TRANSIT', 'DELIVERED', 'COMPLETED', 'CANCELLED'];
 
+/**
+ * A trip the fleet has lost track of. Both halves matter to a dispatcher for
+ * the same reason, so the badge says what is wrong and the title says what it
+ * costs them: the truck and driver cannot take new work until it is settled.
+ */
+function StaleBadge({ trip }: { trip: Trip }) {
+  const reason = trip.deliveryOverdue
+    ? { label: 'Delivery overdue', why: 'This trip is still in transit past its expected delivery date.' }
+    : trip.startOverdue
+      ? { label: 'Start overdue', why: 'This trip’s start date has passed and it was never dispatched.' }
+      : null;
+  if (!reason) return null;
+
+  return (
+    <span
+      title={`${reason.why} Its truck and driver cannot be booked onto a new trip until it is rescheduled, completed or cancelled.`}
+      className="rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] font-semibold text-destructive"
+    >
+      {reason.label}
+    </span>
+  );
+}
+
 /** Shared by /trips (staff) and /my-trips (driver). */
 export function TripsView({ title, description }: { title: string; description: string }) {
   const router = useRouter();
@@ -33,7 +56,7 @@ export function TripsView({ title, description }: { title: string; description: 
 
   const list = useListState({
     defaultSort: 'startDate',
-    filterKeys: ['status', 'active', 'manager', 'truck', 'driver'],
+    filterKeys: ['status', 'active', 'stale', 'manager', 'truck', 'driver'],
   });
 
   // A driver's own trips need no who-and-what pickers: every row is theirs.
@@ -68,7 +91,7 @@ export function TripsView({ title, description }: { title: string; description: 
           <p className="flex items-center gap-2 font-medium">
             <span className="tabular">{trip.tripCode}</span>
             <StatusBadge status={trip.status} size="sm" />
-            {trip.startOverdue ? <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] font-semibold text-destructive">Start overdue</span> : null}
+            <StaleBadge trip={trip} />
           </p>
           <p className="mt-0.5 flex items-center gap-1 truncate text-xs text-muted-foreground">
             <MapPin className="size-3 shrink-0" />
@@ -189,6 +212,16 @@ export function TripsView({ title, description }: { title: string; description: 
             ],
             onChange: (value) => list.setFilter('active', value),
           },
+          {
+            key: 'stale',
+            label: 'Needs attention',
+            value: list.filters.stale ?? 'ALL',
+            options: [
+              { label: 'All trips', value: 'ALL' },
+              { label: 'Holding a truck or driver', value: 'true' },
+            ],
+            onChange: (value) => list.setFilter('stale', value),
+          },
           ...fleetFilters,
         ]}
       />
@@ -234,7 +267,7 @@ export function TripsView({ title, description }: { title: string; description: 
             <div className="flex items-center gap-2">
               <span className="font-medium tabular">{trip.tripCode}</span>
               <StatusBadge status={trip.status} size="sm" />
-              {trip.startOverdue ? <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] font-semibold text-destructive">Start overdue</span> : null}
+              <StaleBadge trip={trip} />
             </div>
             <p className="text-xs text-muted-foreground">
               {trip.pickupLocation} → {trip.deliveryLocation}

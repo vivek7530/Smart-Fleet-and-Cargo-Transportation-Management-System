@@ -543,12 +543,14 @@ function AttentionPanel({ data }: { data: StaffDashboard }) {
   const { kpis } = data;
   const items = [
     {
-      count: kpis.overdueStarts,
-      label: 'Trips not started on schedule',
-      detail: kpis.overdueStarts ? 'Review and reschedule these trips' : 'No overdue starts',
+      count: kpis.staleTrips,
+      label: 'Trips holding a truck or driver',
+      detail: kpis.staleTrips
+        ? 'Overdue or never dispatched — settle these to free the truck and driver'
+        : 'Nothing stuck',
       icon: Route,
       tone: 'bg-warning-soft text-warning',
-      href: '/trips',
+      href: '/trips?stale=true',
     },
     {
       count: kpis.pendingExpenseCount,

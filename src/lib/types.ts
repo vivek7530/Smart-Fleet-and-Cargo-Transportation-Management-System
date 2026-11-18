@@ -375,6 +375,7 @@ export interface Trip {
   odometerReadings: TripOdometerReading[];
   status: TripStatus;
   startOverdue?: boolean;
+  deliveryOverdue?: boolean;
   // Optional because the API strips them for a VIEW-only sharee, for an
   // inherited trip, and for drivers. Absent means "not yours to see".
   revenue?: number;
@@ -563,7 +564,7 @@ export interface DashboardKpis {
   plannedTrips: number;
   completedTrips: number;
   cancelledTrips: number;
-  overdueStarts: number;
+  staleTrips: number;
   tripsInRange: number;
   revenue: number;
   fuelExpenses: number;

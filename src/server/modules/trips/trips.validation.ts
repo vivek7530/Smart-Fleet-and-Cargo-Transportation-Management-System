@@ -86,6 +86,8 @@ export const listTripsQuerySchema = listQuerySchema.extend({
   manager: objectId.optional(),
   /** Convenience filter for everything currently on the road. */
   active: z.coerce.boolean().optional(),
+  /** Only trips the dispatch gate is holding: overdue, or never dispatched. */
+  stale: z.coerce.boolean().optional(),
 });
 
 export const changeStatusSchema = z.object({
