@@ -196,11 +196,26 @@ export function TripFormDialog({
 
   const toggleCargo = (id: string) => {
     const current = form.getValues('cargo') ?? [];
+    const adding = !current.includes(id);
     form.setValue(
       'cargo',
-      current.includes(id) ? current.filter((value) => value !== id) : [...current, id],
+      adding ? [...current, id] : current.filter((value) => value !== id),
       { shouldDirty: true },
     );
+
+    // A shipment already knows where it is going, so the first one attached
+    // fills the route in rather than making it be typed a second time. Only
+    // empty fields are touched: a trip that collects several shipments has a
+    // route of its own, and whatever was typed is the answer.
+    if (!adding) return;
+    const item = cargoOptions?.find((option) => option.id === id);
+    if (!item) return;
+    if (!form.getValues('pickupLocation')?.trim()) {
+      form.setValue('pickupLocation', item.origin, { shouldDirty: true });
+    }
+    if (!form.getValues('deliveryLocation')?.trim()) {
+      form.setValue('deliveryLocation', item.destination, { shouldDirty: true });
+    }
   };
 
   return (

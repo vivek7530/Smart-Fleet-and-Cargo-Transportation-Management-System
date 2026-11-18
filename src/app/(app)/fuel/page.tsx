@@ -317,6 +317,14 @@ function FuelFormDialog({
     staleTime: 15_000,
   });
 
+  const selectedTruck = form.watch('truck');
+  // Fuel goes into one truck, so only that truck's live trips can be the one
+  // it belongs to. Before a truck is chosen, everything is still a candidate.
+  const tripChoices = React.useMemo(
+    () => (trips?.items ?? []).filter((trip) => !selectedTruck || trip.truck?.id === selectedTruck),
+    [trips, selectedTruck],
+  );
+
   React.useEffect(() => {
     if (!open) return;
     setBannerError(null);
@@ -402,7 +410,17 @@ function FuelFormDialog({
           {isDriver ? (
             <Input value={assignedTruck?.truck?.truckNumber ?? 'No truck assigned'} readOnly disabled />
           ) : (
-            <Select value={form.watch('truck')} onValueChange={(value) => form.setValue('truck', value)}>
+            <Select
+              value={form.watch('truck')}
+              onValueChange={(value) => {
+                form.setValue('truck', value);
+                // A truck on the road has exactly one trip running, and that is
+                // the trip this fuel went into. Offer it rather than make it be
+                // looked up; an explicit choice afterwards still wins.
+                const running = trips?.items.filter((trip) => trip.truck?.id === value) ?? [];
+                if (running.length === 1) form.setValue('trip', running[0].id);
+              }}
+            >
               <SelectTrigger invalid={Boolean(errors.truck)}>
                 <SelectValue placeholder="Choose a truck" />
               </SelectTrigger>
@@ -417,14 +435,21 @@ function FuelFormDialog({
           )}
         </FormField>
 
-        <FormField label="Trip" hint="Optional — links the cost to a trip.">
+        <FormField
+          label="Trip"
+          hint={
+            selectedTruck && tripChoices.length === 0
+              ? 'This truck has no trip running.'
+              : 'Optional — links the cost to a trip.'
+          }
+        >
           <Select value={form.watch('trip') || 'NONE'} onValueChange={(value) => form.setValue('trip', value)}>
             <SelectTrigger>
               <SelectValue placeholder="Not linked to a trip" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="NONE">Not linked to a trip</SelectItem>
-              {trips?.items.map((trip) => (
+              {tripChoices.map((trip) => (
                 <SelectItem key={trip.id} value={trip.id}>
                   {trip.tripCode} · {trip.pickupLocation} → {trip.deliveryLocation}
                 </SelectItem>

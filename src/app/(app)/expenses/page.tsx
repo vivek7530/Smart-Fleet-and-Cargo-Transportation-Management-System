@@ -536,7 +536,16 @@ function ExpenseFormDialog({
         </FormField>
 
         <FormField label="Trip" hint="Optional — links the claim to a trip.">
-          <Select value={form.watch('trip') || 'NONE'} onValueChange={(value) => form.setValue('trip', value)}>
+          <Select
+            value={form.watch('trip') || 'NONE'}
+            onValueChange={(value) => {
+              form.setValue('trip', value);
+              // The trip already says who drove it, so filing a claim against
+              // one answers the Driver field above.
+              const chosen = trips?.items.find((trip) => trip.id === value);
+              if (chosen?.driver) form.setValue('driver', chosen.driver.id);
+            }}
+          >
             <SelectTrigger>
               <SelectValue placeholder="Not linked to a trip" />
             </SelectTrigger>
