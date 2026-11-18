@@ -26,7 +26,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   React.useEffect(() => {
     if (!isLoading && !user) {
-      const next = pathname && pathname !== '/dashboard' ? `?next=${encodeURIComponent(pathname)}` : '';
+      // The query string is part of where they were: `/trips?stale=true` is a
+      // different page from `/trips`, so dropping it lands them somewhere they
+      // did not ask for. `window` is safe here — effects only run on the client.
+      const search = typeof window === 'undefined' ? '' : window.location.search;
+      const target = `${pathname ?? ''}${search}`;
+      const next = pathname && pathname !== '/dashboard' ? `?next=${encodeURIComponent(target)}` : '';
       router.replace(`/login${next}`);
     }
   }, [isLoading, user, router, pathname]);

@@ -3,6 +3,7 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { safeInternalPath } from '@/lib/redirect';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -67,7 +68,7 @@ function LoginForm() {
   const [phase, setPhase] = React.useState<TruckButtonPhase>('idle');
   const welcomeName = React.useRef('');
 
-  const next = searchParams.get('next') || '/dashboard';
+  const next = safeInternalPath(searchParams.get('next'));
 
   const {
     register,
