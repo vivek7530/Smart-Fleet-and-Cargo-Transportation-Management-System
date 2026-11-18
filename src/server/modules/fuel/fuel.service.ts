@@ -85,22 +85,31 @@ export async function listFuel(query: ListQuery, ctx: Ctx) {
 }
 
 export async function createFuelRecord(input: z.infer<typeof createFuelSchema>, ctx: Ctx) {
-  // A driver may only log fuel against the truck they are responsible for; a
-  // manager, only against a truck they hold. Fuel also advances the truck's
-  // odometer, so this writes to the vehicle itself.
+  // A manager may only log fuel against a truck they hold. A driver may log it
+  // against the truck assigned to them on paper, or against the truck their own
+  // trip is running on — a driver sent out on a spare vehicle is still the one
+  // standing at the pump. Fuel also advances the truck's odometer, so this
+  // writes to the vehicle itself.
   let truck;
   if (ctx.user.role === 'DRIVER') {
     truck = await Truck.findById(input.truck).select('truckNumber assignedDriver odometerKm');
     if (!truck) throw ApiError.badRequest('The selected truck could not be found');
-    if (String(truck.assignedDriver) !== String(ctx.user._id)) {
-      throw ApiError.forbidden('You can only record fuel for the truck assigned to you');
-    }
   } else {
     truck = await requireTruckAccess(input.truck, ctx.user);
   }
+  let trip = null;
   if (input.trip) {
-    const trip = await assertTripAccessible(input.trip, ctx);
+    trip = await assertTripAccessible(input.trip, ctx);
     if (String(trip.truck) !== String(truck._id)) throw ApiError.validation('The selected trip does not use this truck');
+  }
+  if (ctx.user.role === 'DRIVER' && String(truck.assignedDriver) !== String(ctx.user._id)) {
+    // A cancelled trip is nobody's errand, so it cannot be what puts this
+    // driver at the pump with this truck.
+    if (!trip || trip.status === 'CANCELLED') {
+      throw ApiError.forbidden(
+        'You can only record fuel for the truck assigned to you, or for the truck your trip is running on',
+      );
+    }
   }
   if (input.odometerKm != null) {
     if (input.odometerKm < truck.odometerKm) {
