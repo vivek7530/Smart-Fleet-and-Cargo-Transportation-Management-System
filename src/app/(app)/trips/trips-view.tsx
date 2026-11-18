@@ -56,7 +56,7 @@ export function TripsView({ title, description }: { title: string; description: 
 
   const list = useListState({
     defaultSort: 'startDate',
-    filterKeys: ['status', 'active', 'stale', 'manager', 'truck', 'driver'],
+    filterKeys: ['status', 'active', ...(isStaff ? ['stale'] : []), 'manager', 'truck', 'driver'],
   });
 
   // A driver's own trips need no who-and-what pickers: every row is theirs.
@@ -212,16 +212,21 @@ export function TripsView({ title, description }: { title: string; description: 
             ],
             onChange: (value) => list.setFilter('active', value),
           },
-          {
-            key: 'stale',
-            label: 'Needs attention',
-            value: list.filters.stale ?? 'ALL',
-            options: [
-              { label: 'All trips', value: 'ALL' },
-              { label: 'Holding a truck or driver', value: 'true' },
-            ],
-            onChange: (value) => list.setFilter('stale', value),
-          },
+          // The dispatcher's view of the backlog. A driver can neither
+          // reschedule nor cancel a trip, so for them it would only be a filter
+          // onto work they cannot act on.
+          ...(isStaff
+            ? [{
+              key: 'stale',
+              label: 'Needs attention',
+              value: list.filters.stale ?? 'ALL',
+              options: [
+                { label: 'All trips', value: 'ALL' },
+                { label: 'Holding a truck or driver', value: 'true' },
+              ],
+              onChange: (value: string) => list.setFilter('stale', value),
+            }]
+            : []),
           ...fleetFilters,
         ]}
       />
