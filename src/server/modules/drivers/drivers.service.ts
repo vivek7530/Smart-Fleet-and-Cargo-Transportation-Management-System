@@ -103,7 +103,7 @@ export async function listDrivers(query: z.infer<typeof listDriversQuerySchema>,
 }
 
 export async function getDriver(id: string, user: ActorLike) {
-  const driver = await User.findOne({ _id: id, role: 'DRIVER' });
+  const driver = await User.findOne({ _id: id, role: 'DRIVER' }).populate('manager', 'name avatarColor');
   if (!driver) throw ApiError.notFound('That driver could not be found');
   // Same message either way: a driver who works for someone else must be
   // indistinguishable from one who does not exist. Their recent trips are

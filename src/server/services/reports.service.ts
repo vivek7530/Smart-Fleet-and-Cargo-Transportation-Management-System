@@ -748,3 +748,173 @@ function round(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
+
+/* -------------------------------------------------------------------------- *
+ * Per-manager breakdown
+ * -------------------------------------------------------------------------- */
+
+export interface ManagerFinancials {
+  manager: { id: string; name: string; avatarColor?: string } | null;
+  trucks: number;
+  drivers: number;
+  trips: number;
+  revenue: number;
+  fuelExpenses: number;
+  maintenanceExpenses: number;
+  driverExpenses: number;
+  transportationCosts: number;
+  totalExpenses: number;
+  profit: number;
+  margin: number;
+}
+
+/**
+ * The same figures the whole-company report shows, split by the manager who
+ * held the truck.
+ *
+ * A trip records its owner directly, so revenue groups in one pass. Nothing
+ * else does: a fuel receipt knows its truck, a trip cost knows its trip, and a
+ * driver claim may know either. So the ownership of every truck and every trip
+ * is read once into two maps, each collection is aggregated by its own foreign
+ * key, and the rows are folded into managers here.
+ *
+ * Trips inherited from a previous owner are left out of revenue on purpose:
+ * that money was earned under someone else, and counting it here would flatter
+ * whoever happens to hold the truck today. `reportScopeFor` already applies the
+ * same reasoning to a manager's own figures.
+ *
+ * A null manager is the work nobody holds — unowned trucks and their trips. It
+ * is shown rather than dropped, because money moving through a truck no manager
+ * is answerable for is exactly what an administrator needs to see.
+ */
+export async function financialsByManager(range: DateRange): Promise<ManagerFinancials[]> {
+  const window = { $gte: range.from, $lte: range.to };
+
+  const [managers, trucks, trips, driverCounts] = await Promise.all([
+    User.find({ role: 'MANAGER', status: { $ne: 'ARCHIVED' } })
+      .select('name avatarColor')
+      .sort({ name: 1 })
+      .lean(),
+    Truck.find({}).select('owner').lean(),
+    Trip.find({}).select('owner truck inheritedFrom').lean(),
+    User.aggregate<{ _id: Types.ObjectId | null; count: number }>([
+      { $match: { role: 'DRIVER', status: { $ne: 'ARCHIVED' } } },
+      { $group: { _id: '$manager', count: { $sum: 1 } } },
+    ]),
+  ]);
+
+  const ownerOfTruck = new Map<string, string | null>();
+  for (const truck of trucks) ownerOfTruck.set(String(truck._id), truck.owner ? String(truck.owner) : null);
+
+  const ownerOfTrip = new Map<string, string | null>();
+  for (const trip of trips) ownerOfTrip.set(String(trip._id), trip.owner ? String(trip.owner) : null);
+
+  const [revenueRows, fuelRows, maintenanceRows, expenseRows, costRows] = await Promise.all([
+    Trip.aggregate<{ _id: Types.ObjectId | null; revenue: number; trips: number }>([
+      { $match: { status: 'COMPLETED', completedAt: window, inheritedFrom: null } },
+      { $group: { _id: '$owner', revenue: { $sum: '$revenue' }, trips: { $sum: 1 } } },
+    ]),
+    FuelRecord.aggregate<{ _id: Types.ObjectId | null; total: number }>([
+      { $match: { date: window } },
+      { $group: { _id: '$truck', total: { $sum: '$totalCost' } } },
+    ]),
+    Maintenance.aggregate<{ _id: Types.ObjectId | null; total: number }>([
+      { $match: { date: window, status: 'COMPLETED' } },
+      { $group: { _id: '$truck', total: { $sum: '$cost' } } },
+    ]),
+    DriverExpense.aggregate<{ _id: { trip: Types.ObjectId | null; truck: Types.ObjectId | null }; total: number }>([
+      { $match: { date: window, status: 'APPROVED' } },
+      { $group: { _id: { trip: '$trip', truck: '$truck' }, total: { $sum: '$amount' } } },
+    ]),
+    TransportationCost.aggregate<{ _id: Types.ObjectId | null; total: number }>([
+      { $match: { date: window } },
+      { $group: { _id: '$trip', total: { $sum: '$amount' } } },
+    ]),
+  ]);
+
+  /** Accumulated rows, keyed by manager id; the empty string means nobody. */
+  const buckets = new Map<string, ManagerFinancials>();
+
+  const bucketFor = (ownerId: string | null | undefined): ManagerFinancials => {
+    const key = ownerId ?? '';
+    let bucket = buckets.get(key);
+    if (!bucket) {
+      bucket = {
+        manager: null,
+        trucks: 0,
+        drivers: 0,
+        trips: 0,
+        revenue: 0,
+        fuelExpenses: 0,
+        maintenanceExpenses: 0,
+        driverExpenses: 0,
+        transportationCosts: 0,
+        totalExpenses: 0,
+        profit: 0,
+        margin: 0,
+      };
+      buckets.set(key, bucket);
+    }
+    return bucket;
+  };
+
+  // Every manager appears, including one who earned nothing this period:
+  // "nothing" is a finding, not a row to omit.
+  for (const manager of managers) {
+    bucketFor(String(manager._id)).manager = {
+      id: String(manager._id),
+      name: manager.name,
+      avatarColor: manager.avatarColor,
+    };
+  }
+
+  for (const truck of trucks) bucketFor(truck.owner ? String(truck.owner) : null).trucks += 1;
+  for (const row of driverCounts) bucketFor(row._id ? String(row._id) : null).drivers += row.count;
+
+  for (const row of revenueRows) {
+    const bucket = bucketFor(row._id ? String(row._id) : null);
+    bucket.revenue += row.revenue;
+    bucket.trips += row.trips;
+  }
+  for (const row of fuelRows) {
+    bucketFor(ownerOfTruck.get(String(row._id)) ?? null).fuelExpenses += row.total;
+  }
+  for (const row of maintenanceRows) {
+    bucketFor(ownerOfTruck.get(String(row._id)) ?? null).maintenanceExpenses += row.total;
+  }
+  for (const row of costRows) {
+    bucketFor(ownerOfTrip.get(String(row._id)) ?? null).transportationCosts += row.total;
+  }
+  for (const row of expenseRows) {
+    // A claim filed against a trip answers to that trip's owner; one filed
+    // against a truck alone answers to the truck's.
+    const owner = row._id.trip
+      ? (ownerOfTrip.get(String(row._id.trip)) ?? null)
+      : (ownerOfTruck.get(String(row._id.truck)) ?? null);
+    bucketFor(owner).driverExpenses += row.total;
+  }
+
+  const rows = [...buckets.values()].map((bucket) => {
+    const totalExpenses = round(
+      bucket.fuelExpenses + bucket.maintenanceExpenses + bucket.driverExpenses + bucket.transportationCosts,
+    );
+    const revenue = round(bucket.revenue);
+    return {
+      ...bucket,
+      revenue,
+      fuelExpenses: round(bucket.fuelExpenses),
+      maintenanceExpenses: round(bucket.maintenanceExpenses),
+      driverExpenses: round(bucket.driverExpenses),
+      transportationCosts: round(bucket.transportationCosts),
+      totalExpenses,
+      profit: round(revenue - totalExpenses),
+      margin: revenue > 0 ? round(((revenue - totalExpenses) / revenue) * 100) : 0,
+    };
+  });
+
+  // Biggest earners first. The unowned bucket sorts with everyone else, and is
+  // dropped entirely when it holds nothing at all.
+  return rows
+    .filter((row) => row.manager !== null || row.trucks > 0 || row.trips > 0 || row.totalExpenses > 0)
+    .sort((a, b) => b.revenue - a.revenue || (a.manager?.name ?? '').localeCompare(b.manager?.name ?? ''));
+}

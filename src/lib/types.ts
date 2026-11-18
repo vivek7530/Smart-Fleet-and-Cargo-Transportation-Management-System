@@ -282,6 +282,23 @@ export interface MyFleetReport {
   };
 }
 
+/** One manager's slice of a reporting period — see Reports → By manager. */
+export interface ManagerFinancials {
+  /** null is the work nobody holds: unowned trucks and their trips. */
+  manager: { id: string; name: string; avatarColor?: string } | null;
+  trucks: number;
+  drivers: number;
+  trips: number;
+  revenue: number;
+  fuelExpenses: number;
+  maintenanceExpenses: number;
+  driverExpenses: number;
+  transportationCosts: number;
+  totalExpenses: number;
+  profit: number;
+  margin: number;
+}
+
 export interface ManagerFleetReport {
   groups: ManagerFleetGroup[];
   /** Trucks nobody holds yet. */

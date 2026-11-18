@@ -3,17 +3,21 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, IdCard, Mail, Phone, Route, Truck as TruckIcon } from '@/components/icons';
-import { api } from '@/lib/api';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ArrowLeft, IdCard, Mail, Manager as ManagerIcon, Phone, Route, Truck as TruckIcon } from '@/components/icons';
+import { toast } from 'sonner';
+import { api, errorMessage } from '@/lib/api';
 import { formatCurrency, formatDate, formatNumber } from '@/lib/format';
 import { humanise } from '@/lib/utils';
-import type { Trip, Truck, UserRecord } from '@/lib/types';
+import type { Page, Trip, Truck, UserRecord } from '@/lib/types';
 import { PageHeader } from '@/components/data/list-toolbar';
 import { MiniStat } from '@/components/data/stat-card';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Avatar, Separator } from '@/components/ui/misc';
+import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useAuth } from '@/components/auth-provider';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { EmptyState, ErrorState } from '@/components/ui/empty-state';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -128,6 +132,10 @@ export default function DriverDetailPage() {
 
             <Separator />
 
+            <WorksUnder driver={driver} />
+
+            <Separator />
+
             <div className="grid grid-cols-2 gap-4">
               <MiniStat label="Recent trips" value={formatNumber(recentTrips.length)} />
               <MiniStat label="Completed" value={formatNumber(completed)} tone="success" />
@@ -210,6 +218,88 @@ export default function DriverDetailPage() {
           </Card>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Who this driver works under, and — for an administrator — a way to change it.
+ *
+ * `User.manager` decides which manager sees this driver, their trips and their
+ * claims, and until now it could only be set while inviting them. Every driver
+ * onboarded before that existed is stranded with nobody, invisible to every
+ * manager, and this is the only place that can put it right.
+ *
+ * A manager sees the name but no control: moving a driver between rosters is an
+ * administrative act, and the server refuses it for anyone else.
+ */
+function WorksUnder({ driver }: { driver: UserRecord }) {
+  const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'ADMIN';
+
+  const { data: managers } = useQuery({
+    queryKey: ['users', 'manager-picker'],
+    queryFn: () => api.get<Page<UserRecord>>('/users', { role: 'MANAGER', status: 'ACTIVE', limit: 100 }),
+    enabled: isAdmin,
+    staleTime: 60_000,
+  });
+
+  const assign = useMutation({
+    mutationFn: (managerId: string) =>
+      api.patch(`/users/${driver.id}`, { manager: managerId === 'NONE' ? null : managerId }),
+    onSuccess() {
+      // The roster, the by-manager view and this page all just changed.
+      queryClient.invalidateQueries({ queryKey: ['driver', driver.id] });
+      queryClient.invalidateQueries({ queryKey: ['/drivers'] });
+      queryClient.invalidateQueries({ queryKey: ['/users'] });
+      queryClient.invalidateQueries({ queryKey: ['/trucks/by-manager'] });
+      toast.success('Manager updated');
+    },
+    onError: (error) => toast.error(errorMessage(error, 'Could not change this driver’s manager.')),
+  });
+
+  return (
+    <div className="space-y-3">
+      <p className="flex items-center gap-1.5 text-2xs font-semibold uppercase tracking-wide text-muted-foreground">
+        <ManagerIcon className="size-3.5" />
+        Works under
+      </p>
+
+      {isAdmin ? (
+        <Select
+          value={driver.manager?.id ?? 'NONE'}
+          onValueChange={(value) => assign.mutate(value)}
+          disabled={assign.isPending}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="No manager" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="NONE">No manager</SelectItem>
+            {managers?.items.map((manager) => (
+              <SelectItem key={manager.id} value={manager.id}>
+                {manager.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      ) : driver.manager ? (
+        <div className="flex items-center gap-2">
+          <Avatar name={driver.manager.name} color={driver.manager.avatarColor} size="xs" />
+          <span className="truncate text-[13px]">{driver.manager.name}</span>
+        </div>
+      ) : (
+        <Badge variant="danger" size="sm">
+          No manager
+        </Badge>
+      )}
+
+      {isAdmin && !driver.manager ? (
+        <p className="text-xs text-destructive">
+          Nobody manages this driver, so no manager can see them, their trips or their claims.
+        </p>
+      ) : null}
     </div>
   );
 }

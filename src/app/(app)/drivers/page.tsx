@@ -8,6 +8,7 @@ import type { Truck, UserRecord } from '@/lib/types';
 import { useAuth } from '@/components/auth-provider';
 import { useInfiniteList } from '@/hooks/use-infinite-list';
 import { useListState } from '@/hooks/use-list-state';
+import { useFleetFilterOptions } from '@/hooks/use-fleet-filters';
 import { DataList, type Column } from '@/components/data/data-list';
 import { ListToolbar, PageHeader, optionsFrom } from '@/components/data/list-toolbar';
 import { RowActions } from '@/components/data/row-actions';
@@ -32,7 +33,12 @@ export default function DriversPage() {
   // A manager onboards onto their own roster, so they get the button too.
   const canInvite = isAdmin || user?.role === 'MANAGER';
 
-  const list = useListState({ defaultSort: 'createdAt', filterKeys: ['status', 'availability'] });
+  const list = useListState({
+    defaultSort: 'createdAt',
+    filterKeys: ['status', 'availability', 'manager', 'unassigned'],
+  });
+
+  const { managerOptions } = useFleetFilterOptions({ enabled: isAdmin });
   const [inviteOpen, setInviteOpen] = React.useState(false);
 
   const query = useInfiniteList<DriverRow>({ path: '/drivers', params: list.params });
@@ -213,6 +219,30 @@ export default function DriversPage() {
             onChange: (value) => list.setFilter('availability', value),
             primary: true,
           },
+          // Whose roster. Only an administrator asks this: a manager already
+          // sees nobody else's drivers.
+          ...(isAdmin
+            ? [
+                {
+                  key: 'manager',
+                  label: 'Manager',
+                  value: list.filters.manager ?? 'ALL',
+                  options: managerOptions,
+                  onChange: (value: string) => list.setFilter('manager', value),
+                  primary: true,
+                },
+                {
+                  key: 'unassigned',
+                  label: 'Roster',
+                  value: list.filters.unassigned ?? 'ALL',
+                  options: [
+                    { label: 'Everyone', value: 'ALL' },
+                    { label: 'No manager', value: 'true' },
+                  ],
+                  onChange: (value: string) => list.setFilter('unassigned', value),
+                },
+              ]
+            : []),
         ]}
       />
 

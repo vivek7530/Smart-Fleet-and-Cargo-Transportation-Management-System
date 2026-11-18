@@ -10,7 +10,7 @@ import { formatDate, formatNumber, formatWeight } from '@/lib/format';
 import type { Truck } from '@/lib/types';
 import { useInfiniteList } from '@/hooks/use-infinite-list';
 import { useListState } from '@/hooks/use-list-state';
-import { useFleetFilters } from '@/hooks/use-fleet-filters';
+import { useFleetFilterOptions, useFleetFilters } from '@/hooks/use-fleet-filters';
 import { DataList, type Column } from '@/components/data/data-list';
 import { ListToolbar, PageHeader, optionsFrom } from '@/components/data/list-toolbar';
 import { RowActions } from '@/components/data/row-actions';
@@ -30,10 +30,11 @@ export default function TrucksPage() {
   const queryClient = useQueryClient();
   const list = useListState({
     defaultSort: 'createdAt',
-    filterKeys: ['status', 'fuelType', 'owner', 'assignedDriver'],
+    filterKeys: ['status', 'fuelType', 'owner', 'assignedDriver', 'unowned'],
   });
 
   // The truck list calls its own fields owner and assignedDriver.
+  const { isAdmin } = useFleetFilterOptions();
   const fleetFilters = useFleetFilters(list, { include: ['manager', 'driver'] }).map((filter) =>
     filter.key === 'manager'
       ? { ...filter, key: 'owner', value: list.filters.owner ?? 'ALL', onChange: (v: string) => list.setFilter('owner', v) }
@@ -188,6 +189,22 @@ export default function TrucksPage() {
             onChange: (value) => list.setFilter('fuelType', value),
           },
           ...fleetFilters,
+          // An unowned truck is invisible to every manager, so finding them is
+          // an administrative job and nobody else's.
+          ...(isAdmin
+            ? [
+                {
+                  key: 'unowned',
+                  label: 'Ownership',
+                  value: list.filters.unowned ?? 'ALL',
+                  options: [
+                    { label: 'All trucks', value: 'ALL' },
+                    { label: 'No manager', value: 'true' },
+                  ],
+                  onChange: (value: string) => list.setFilter('unowned', value),
+                },
+              ]
+            : []),
         ]}
       />
 

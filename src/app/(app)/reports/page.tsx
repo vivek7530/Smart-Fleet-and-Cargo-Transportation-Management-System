@@ -2,16 +2,18 @@
 
 import * as React from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Route, TrendingDown, TrendingUp, Truck, UserRound, Wallet } from '@/components/icons';
+import { AlertTriangle, Manager, Route, Steering, TrendingDown, TrendingUp, Truck, UserRound, Wallet } from '@/components/icons';
 import { api } from '@/lib/api';
 import { formatCurrency, formatDate, formatNumber } from '@/lib/format';
-import { humanise } from '@/lib/utils';
-import type { ReportSummary } from '@/lib/types';
+import { cn, humanise } from '@/lib/utils';
+import type { ManagerFinancials, ReportSummary } from '@/lib/types';
 import { DateRangeFilter, rangeParams, type RangeValue } from '@/components/data/date-range-filter';
 import { PageHeader } from '@/components/data/list-toolbar';
 import { StatCard } from '@/components/data/stat-card';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Avatar } from '@/components/ui/misc';
+import { Badge } from '@/components/ui/badge';
+import { useAuth } from '@/components/auth-provider';
 import { Skeleton, SkeletonStatGrid } from '@/components/ui/skeleton';
 import { EmptyState, ErrorState } from '@/components/ui/empty-state';
 import {
@@ -89,6 +91,8 @@ export default function ReportsPage() {
               sparkline={{ data: data.series, dataKey: 'trips', tone: 'trips' }}
             />
           </section>
+
+          <ByManager range={range} />
 
           <section className="grid gap-4 lg:grid-cols-3">
             <Card className="lg:col-span-2">
@@ -258,5 +262,125 @@ function ReportsSkeleton() {
         ))}
       </div>
     </div>
+  );
+}
+
+/**
+ * The same period's figures, split by the manager who held the truck.
+ *
+ * Administrators only — a manager's whole report is already their own fleet, so
+ * for them this would be one row repeating the totals above.
+ *
+ * Every manager is listed, including one who earned nothing: an idle fleet is
+ * what this table exists to surface. The unowned row is the work no manager is
+ * answerable for, which is the sharpest version of the same point.
+ */
+function ByManager({ range }: { range: RangeValue }) {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'ADMIN';
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['reports', 'by-manager', range],
+    queryFn: () => api.get<{ rows: ManagerFinancials[] }>('/reports/by-manager', rangeParams(range)),
+    enabled: isAdmin,
+  });
+
+  if (!isAdmin) return null;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Manager className="size-4" />
+          By manager
+        </CardTitle>
+        <CardDescription>
+          Who earned what this period, and what it cost them. Revenue follows the truck&apos;s owner, so a
+          trip inherited from a previous manager is left out.
+        </CardDescription>
+      </CardHeader>
+
+      <CardContent>
+        {isLoading ? (
+          <Skeleton className="h-40 rounded-lg" />
+        ) : !data?.rows.length ? (
+          <EmptyState
+            compact
+            icon={<Manager />}
+            title="No managers yet"
+            description="Invite a manager and hand them a truck to see a breakdown here."
+          />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px] text-[13px]">
+              <thead>
+                <tr className="border-b text-left text-[11.5px] uppercase tracking-wide text-muted-foreground">
+                  <th className="pb-2 pr-3 font-medium">Manager</th>
+                  <th className="pb-2 pr-3 text-right font-medium">Fleet</th>
+                  <th className="pb-2 pr-3 text-right font-medium">Trips</th>
+                  <th className="pb-2 pr-3 text-right font-medium">Revenue</th>
+                  <th className="pb-2 pr-3 text-right font-medium">Expenses</th>
+                  <th className="pb-2 pr-3 text-right font-medium">Profit</th>
+                  <th className="pb-2 text-right font-medium">Margin</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {data.rows.map((row) => (
+                  <tr key={row.manager?.id ?? 'unowned'}>
+                    <td className="py-2.5 pr-3">
+                      {row.manager ? (
+                        <span className="flex items-center gap-2">
+                          <Avatar name={row.manager.name} color={row.manager.avatarColor} size="xs" />
+                          <span className="truncate font-medium">{row.manager.name}</span>
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-2 text-destructive">
+                          <AlertTriangle className="size-3.5 shrink-0" />
+                          <span className="font-medium">No manager</span>
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-2.5 pr-3 text-right">
+                      <span className="inline-flex items-center gap-2 text-muted-foreground">
+                        <span className="inline-flex items-center gap-1 tabular">
+                          <Truck className="size-3.5" />
+                          {formatNumber(row.trucks)}
+                        </span>
+                        <span className="inline-flex items-center gap-1 tabular">
+                          <Steering className="size-3.5" />
+                          {formatNumber(row.drivers)}
+                        </span>
+                      </span>
+                    </td>
+                    <td className="py-2.5 pr-3 text-right tabular">{formatNumber(row.trips)}</td>
+                    <td className="py-2.5 pr-3 text-right tabular font-medium">{formatCurrency(row.revenue)}</td>
+                    <td className="py-2.5 pr-3 text-right tabular text-muted-foreground">
+                      {formatCurrency(row.totalExpenses)}
+                    </td>
+                    <td
+                      className={cn(
+                        'py-2.5 pr-3 text-right tabular font-medium',
+                        row.profit > 0 && 'text-success',
+                        row.profit < 0 && 'text-destructive',
+                      )}
+                    >
+                      {formatCurrency(row.profit)}
+                    </td>
+                    <td className="py-2.5 text-right">
+                      <Badge
+                        variant={row.margin >= 15 ? 'success' : row.margin > 0 ? 'warning' : 'neutral'}
+                        size="sm"
+                      >
+                        {row.margin}%
+                      </Badge>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
