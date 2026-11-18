@@ -33,6 +33,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/components/auth-provider';
+import { OdometerCorrectionDialog } from '@/components/data/odometer-correction';
 import { useFleetFilterOptions } from '@/hooks/use-fleet-filters';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Avatar, Separator, Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/misc';
@@ -62,6 +63,9 @@ export default function TruckDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const [editOpen, setEditOpen] = React.useState(false);
+  const [correctingOdometer, setCorrectingOdometer] = React.useState(false);
+  const { user: viewer } = useAuth();
+  const isStaff = viewer?.role === 'ADMIN' || viewer?.role === 'MANAGER';
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['truck', params.id],
@@ -156,7 +160,18 @@ export default function TruckDetailPage() {
                 <MiniStat label="Year" value={truck.year} />
               )}
               <MiniStat label="Capacity" value={formatWeight(truck.capacityTons)} />
-              <MiniStat label="Odometer" value={`${formatNumber(truck.odometerKm)} km`} />
+              <div className="space-y-1">
+                <MiniStat label="Odometer" value={`${formatNumber(truck.odometerKm)} km`} />
+                {isStaff ? (
+                  <button
+                    type="button"
+                    onClick={() => setCorrectingOdometer(true)}
+                    className="focus-ring rounded text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                  >
+                    Correct reading
+                  </button>
+                ) : null}
+              </div>
               <MiniStat label="Fuel type" value={humanise(truck.fuelType)} />
               {truck.mileageKmPerLitre ? (
                 <MiniStat label="Mileage" value={`${truck.mileageKmPerLitre} km/L`} />
@@ -349,6 +364,15 @@ export default function TruckDetailPage() {
           <CardContent className="pt-4" />
         </Card>
       </div>
+
+      <OdometerCorrectionDialog
+        open={correctingOdometer}
+        onOpenChange={setCorrectingOdometer}
+        source="TRUCK"
+        recordId={truck.id}
+        currentKm={truck.odometerKm}
+        invalidate={['truck']}
+      />
 
       <TruckFormDialog open={editOpen} onOpenChange={setEditOpen} truck={truck} />
     </div>

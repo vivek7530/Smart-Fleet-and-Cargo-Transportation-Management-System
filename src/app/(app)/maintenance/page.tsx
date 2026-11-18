@@ -5,7 +5,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { CalendarClock, Pencil, Plus, Trash2, Wrench } from '@/components/icons';
+import {
+  CalendarClock,
+  Gauge,
+  Pencil,
+  Plus,
+  Trash2,
+  Wrench,
+} from '@/components/icons';
 import { toast } from 'sonner';
 import { api, errorMessage } from '@/lib/api';
 import { formatCurrency, formatDate, toDateInput } from '@/lib/format';
@@ -18,6 +25,7 @@ import { useFleetFilters } from '@/hooks/use-fleet-filters';
 import { DataList, type Column } from '@/components/data/data-list';
 import { ListToolbar, PageHeader, optionsFrom } from '@/components/data/list-toolbar';
 import { RowActions } from '@/components/data/row-actions';
+import { OdometerCorrectionDialog } from '@/components/data/odometer-correction';
 import { ResourceDialog, useMutationErrors } from '@/components/data/resource-dialog';
 import { FormField, FormGrid } from '@/components/ui/form-field';
 import { Button } from '@/components/ui/button';
@@ -53,6 +61,7 @@ export default function MaintenancePage() {
   const [formOpen, setFormOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<MaintenanceRecord | null>(null);
   const [deleting, setDeleting] = React.useState<MaintenanceRecord | null>(null);
+  const [correcting, setCorrecting] = React.useState<MaintenanceRecord | null>(null);
 
   const query = useInfiniteList<MaintenanceRecord>({ path: '/maintenance', params: list.params });
 
@@ -230,6 +239,14 @@ export default function MaintenancePage() {
                       },
                     },
                     {
+                      // The reading itself is immutable, so correcting one is
+                      // its own audited action rather than part of the edit.
+                      label: 'Correct odometer',
+                      icon: <Gauge />,
+                      hidden: record.odometerKm == null,
+                      onSelect: () => setCorrecting(record),
+                    },
+                    {
                       label: 'Delete',
                       icon: <Trash2 />,
                       variant: 'destructive',
@@ -245,6 +262,14 @@ export default function MaintenancePage() {
 
       {isStaff ? (
         <>
+          <OdometerCorrectionDialog
+            open={Boolean(correcting)}
+            onOpenChange={(next) => !next && setCorrecting(null)}
+            source="MAINTENANCE"
+            recordId={correcting?.id ?? ''}
+            currentKm={correcting?.odometerKm}
+          />
+
           <MaintenanceFormDialog open={formOpen} onOpenChange={setFormOpen} record={editing} />
           <ConfirmDialog
             open={Boolean(deleting)}

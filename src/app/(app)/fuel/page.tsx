@@ -5,7 +5,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Fuel, Pencil, Plus, Trash2 } from '@/components/icons';
+import {
+  Fuel,
+  Gauge,
+  Pencil,
+  Plus,
+  Trash2,
+} from '@/components/icons';
 import { toast } from 'sonner';
 import { api, errorMessage } from '@/lib/api';
 import { formatCurrency, formatDate, formatNumber, toDateInput } from '@/lib/format';
@@ -18,6 +24,7 @@ import { useFleetFilters } from '@/hooks/use-fleet-filters';
 import { DataList, type Column } from '@/components/data/data-list';
 import { ListToolbar, PageHeader, optionsFrom } from '@/components/data/list-toolbar';
 import { RowActions } from '@/components/data/row-actions';
+import { OdometerCorrectionDialog } from '@/components/data/odometer-correction';
 import { ResourceDialog, useMutationErrors } from '@/components/data/resource-dialog';
 import { FormField, FormGrid } from '@/components/ui/form-field';
 import { Button } from '@/components/ui/button';
@@ -41,6 +48,7 @@ export default function FuelPage() {
   const [formOpen, setFormOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<FuelRecord | null>(null);
   const [deleting, setDeleting] = React.useState<FuelRecord | null>(null);
+  const [correcting, setCorrecting] = React.useState<FuelRecord | null>(null);
 
   const query = useInfiniteList<FuelRecord>({ path: '/fuel', params: list.params });
 
@@ -217,6 +225,14 @@ export default function FuelPage() {
                       },
                     },
                     {
+                      // The reading itself is immutable, so correcting one is
+                      // its own audited action rather than part of the edit.
+                      label: 'Correct odometer',
+                      icon: <Gauge />,
+                      hidden: record.odometerKm == null,
+                      onSelect: () => setCorrecting(record),
+                    },
+                    {
                       label: 'Delete',
                       icon: <Trash2 />,
                       variant: 'destructive',
@@ -228,6 +244,14 @@ export default function FuelPage() {
               )
             : undefined
         }
+      />
+
+      <OdometerCorrectionDialog
+        open={Boolean(correcting)}
+        onOpenChange={(next) => !next && setCorrecting(null)}
+        source="FUEL"
+        recordId={correcting?.id ?? ''}
+        currentKm={correcting?.odometerKm}
       />
 
       <FuelFormDialog open={formOpen} onOpenChange={setFormOpen} record={editing} />
