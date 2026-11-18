@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
-import { Eye, IdCard, Phone, Truck as TruckIcon, UserPlus, UserRound } from '@/components/icons';
+import { Eye, IdCard, Manager, Phone, Steering, Truck as TruckIcon, UserPlus, UserRound } from '@/components/icons';
 import { formatDate, formatNumber } from '@/lib/format';
 import type { Truck, UserRecord } from '@/lib/types';
 import { useAuth } from '@/components/auth-provider';
@@ -13,10 +13,11 @@ import { ListToolbar, PageHeader, optionsFrom } from '@/components/data/list-too
 import { RowActions } from '@/components/data/row-actions';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Avatar } from '@/components/ui/misc';
+import { Avatar, Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/misc';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { InviteUserDialog } from '../users/invite-dialog';
 import { ExpiryCell } from '@/components/data/expiry-cell';
+import { FleetByManager } from '../managers/fleet-by-manager';
 
 interface DriverRow extends UserRecord {
   assignedTruck: Truck | null;
@@ -149,6 +150,42 @@ export default function DriversPage() {
         }
       />
 
+      {isAdmin ? (
+        <Tabs defaultValue="roster" className="space-y-4">
+          <TabsList>
+            <TabsTrigger value="roster">
+              <Steering />
+              Roster
+            </TabsTrigger>
+            <TabsTrigger value="by-manager">
+              <Manager />
+              By manager
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="by-manager">
+            <FleetByManager defaultTab="drivers" />
+          </TabsContent>
+
+          <TabsContent value="roster" className="space-y-5">
+            <Roster />
+          </TabsContent>
+        </Tabs>
+      ) : (
+        <Roster />
+      )}
+
+      <InviteUserDialog open={inviteOpen} onOpenChange={setInviteOpen} defaultRole="DRIVER" />
+    </div>
+  );
+
+  /**
+   * The roster itself. Declared inside so it keeps the page's list state and
+   * query rather than re-fetching behind the tab it sits in.
+   */
+  function Roster() {
+    return (
+      <>
       <ListToolbar
         search={list.search}
         onSearchChange={list.setSearch}
@@ -230,7 +267,7 @@ export default function DriversPage() {
         )}
       />
 
-      <InviteUserDialog open={inviteOpen} onOpenChange={setInviteOpen} defaultRole="DRIVER" />
-    </div>
-  );
+      </>
+    );
+  }
 }

@@ -7,6 +7,7 @@ import {
   IdCard,
   Phone,
   Route,
+  Plus,
   Steering,
   Truck as TruckIcon,
   UserRound,
@@ -15,6 +16,7 @@ import { api } from '@/lib/api';
 import { formatDate, formatNumber } from '@/lib/format';
 import type { MyFleetDriver, MyFleetReport, MyFleetTrip, MyFleetTruck } from '@/lib/types';
 import { PageHeader } from '@/components/data/list-toolbar';
+import { Button } from '@/components/ui/button';
 import { StatCard } from '@/components/data/stat-card';
 import { Avatar, Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/misc';
 import { Badge } from '@/components/ui/badge';
@@ -71,6 +73,14 @@ export default function MyFleetPage() {
       <PageHeader
         title="My fleet"
         description="The trucks you hold, the drivers on your roster and what is on the road right now."
+        actions={
+          <Button asChild>
+            <Link href="/trucks">
+              <Plus />
+              Add a truck
+            </Link>
+          </Button>
+        }
       />
 
       <Stagger className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">

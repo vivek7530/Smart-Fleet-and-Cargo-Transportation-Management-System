@@ -56,7 +56,9 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       { label: 'Trips', href: '/trips', icon: Route, roles: STAFF, description: 'Plan, dispatch and close trips' },
       { label: 'My Trips', href: '/my-trips', icon: Route, roles: ['DRIVER'], description: 'Trips assigned to you' },
-      { label: 'Trucks', href: '/trucks', icon: Truck, roles: STAFF, description: 'The vehicle fleet' },
+      // A manager gets My Fleet instead: same trucks, plus their drivers and
+      // what is on the road. Two entries for one fleet was a duplicate.
+      { label: 'Trucks', href: '/trucks', icon: Truck, roles: ['ADMIN'], description: 'The vehicle fleet' },
       { label: 'My Truck', href: '/my-truck', icon: Truck, roles: ['DRIVER'], description: 'The truck assigned to you' },
       {
         label: 'My Fleet',
@@ -118,13 +120,6 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       { label: 'Users', href: '/users', icon: Users, roles: ['ADMIN'], description: 'Everyone in the system' },
       { label: 'Managers', href: '/managers', icon: Manager, roles: ['ADMIN'], description: 'Manager accounts and activity' },
-      {
-        label: 'Drivers',
-        href: '/driver-accounts',
-        icon: Steering,
-        roles: ['ADMIN'],
-        description: 'Driver accounts and invitations',
-      },
       { label: 'Audit Log', href: '/audit-logs', icon: Audit, roles: ['ADMIN'], description: 'Who did what, and when' },
     ],
   },
