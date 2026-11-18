@@ -1,4 +1,5 @@
 import type { Ctx } from '../../api/context';
+import { Types } from 'mongoose';
 import type { FilterQuery } from 'mongoose';
 import { Invitation } from '../../models/Invitation';
 import { Trip } from '../../models/Trip';
@@ -42,6 +43,12 @@ const USER_SORT_FIELDS = ['createdAt', 'name', 'role', 'status', 'lastLoginAt'];
 export async function inviteUser(input: InviteUserInput, ctx: Ctx) {
   const inviter = ctx.user;
 
+  // A manager onboards their own drivers; inviting another manager, or putting
+  // a driver on somebody else's roster, stays an administrator's decision.
+  if (inviter.role !== 'ADMIN' && input.role !== 'DRIVER') {
+    throw ApiError.forbidden('Only an administrator can invite a manager');
+  }
+
   // Prefer the explicit channel, otherwise fall back to whichever contact was given.
   const channel = input.channel ?? (input.email ? 'EMAIL' : 'MOBILE');
   const lockedContactField = channel === 'EMAIL' ? 'email' : 'mobile';
@@ -49,6 +56,10 @@ export async function inviteUser(input: InviteUserInput, ctx: Ctx) {
 
   if (input.email) await assertContactAvailable('email', input.email);
   if (input.mobile) await assertContactAvailable('mobile', input.mobile);
+
+  // Only a driver works under a manager. The field is meaningless on a manager
+  // invite, so it is dropped rather than quietly stored and later ignored.
+  const manager = input.role === 'DRIVER' ? await resolveManager(input.manager, inviter) : null;
 
   const user = await User.create({
     name: input.name,
@@ -58,6 +69,7 @@ export async function inviteUser(input: InviteUserInput, ctx: Ctx) {
     status: 'INVITED',
     invitationStatus: 'PENDING',
     invitedBy: inviter._id,
+    manager,
     lockedContactField,
     avatarColor: pickAvatarColor(input.name),
   });
@@ -73,6 +85,7 @@ export async function inviteUser(input: InviteUserInput, ctx: Ctx) {
     tokenHash,
     tokenPreview: preview,
     invitedBy: inviter._id,
+    manager,
     user: user._id,
     status: 'PENDING',
     expiresAt: invitationExpiry(),
@@ -125,8 +138,40 @@ export async function listUsers(query: ListQuery & { role?: string; status?: str
     cursor: query.cursor,
     sortBy,
     sortDir,
-    populate: { path: 'invitedBy', select: 'name role' },
+    populate: [
+      { path: 'invitedBy', select: 'name role' },
+      { path: 'manager', select: 'name avatarColor' },
+    ],
   });
+}
+
+/**
+ * Turns the manager id sent with an invite or an update into something safe to
+ * store: it must be a real, active MANAGER, never an admin, a driver or a
+ * suspended account. `null` and `undefined` both mean "nobody", which is a
+ * legitimate state — it is the red flag an administrator then resolves.
+ *
+ * A manager inviting a driver without naming anyone gets themselves, because a
+ * driver they cannot see would be useless to them.
+ */
+async function resolveManager(
+  managerId: string | null | undefined,
+  actor: UserDocument,
+): Promise<Types.ObjectId | null> {
+  if (!managerId) return actor.role === 'MANAGER' ? actor._id : null;
+
+  if (actor.role === 'MANAGER' && String(managerId) !== String(actor._id)) {
+    throw ApiError.forbidden('You can only add drivers to your own roster');
+  }
+
+  const manager = await User.findById(managerId).select('role status').lean();
+  if (!manager || manager.role !== 'MANAGER') {
+    throw ApiError.badRequest('The selected manager could not be found');
+  }
+  if (manager.status !== 'ACTIVE') {
+    throw ApiError.badRequest('That manager’s account is not active');
+  }
+  return manager._id;
 }
 
 /** Managers may only browse drivers; admins see everyone. */
@@ -228,6 +273,21 @@ export async function updateUser(id: string, input: UpdateUserInput, ctx: Ctx) {
   assign('emergencyContactPhone', input.emergencyContactPhone as UserDocument['emergencyContactPhone']);
   if (input.licenseExpiry !== undefined) {
     user.licenseExpiry = input.licenseExpiry ? new Date(input.licenseExpiry) : null;
+  }
+
+  // Reassigning a driver is an administrative act: a manager must not be able
+  // to pull another manager's driver across onto their own roster.
+  if (input.manager !== undefined) {
+    const role = input.role ?? user.role;
+    if (role !== 'DRIVER') {
+      throw ApiError.badRequest('Only a driver works under a manager');
+    }
+    if (actor.role !== 'ADMIN') {
+      throw ApiError.forbidden('Only an administrator can change who a driver works under');
+    }
+    const next = await resolveManager(input.manager, actor);
+    if (String(user.manager ?? '') !== String(next ?? '')) changes.push('manager');
+    user.manager = next;
   }
 
   await user.save();

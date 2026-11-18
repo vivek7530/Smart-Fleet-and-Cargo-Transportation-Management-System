@@ -28,6 +28,8 @@ export default function DriversPage() {
   const router = useRouter();
   const { user } = useAuth();
   const isAdmin = user?.role === 'ADMIN';
+  // A manager onboards onto their own roster, so they get the button too.
+  const canInvite = isAdmin || user?.role === 'MANAGER';
 
   const list = useListState({ defaultSort: 'createdAt', filterKeys: ['status', 'availability'] });
   const [inviteOpen, setInviteOpen] = React.useState(false);
@@ -102,6 +104,27 @@ export default function DriversPage() {
         </div>
       ),
     },
+    ...(isAdmin
+      ? [
+          {
+            key: 'manager',
+            header: 'Works under',
+            width: 'minmax(140px, 1fr)',
+            hideBelow: 'lg',
+            render: (driver: DriverRow) =>
+              driver.manager ? (
+                <div className="flex items-center gap-2">
+                  <Avatar name={driver.manager.name} color={driver.manager.avatarColor} size="xs" />
+                  <span className="truncate text-sm">{driver.manager.name}</span>
+                </div>
+              ) : (
+                <Badge variant="danger" size="sm">
+                  No manager
+                </Badge>
+              ),
+          } as Column<DriverRow>,
+        ]
+      : []),
     {
       key: 'status',
       header: 'Status',
@@ -117,7 +140,7 @@ export default function DriversPage() {
         title="Drivers"
         description="Your driver roster, the truck each one holds and how busy they are."
         actions={
-          isAdmin ? (
+          canInvite ? (
             <Button onClick={() => setInviteOpen(true)}>
               <UserPlus />
               Invite driver
@@ -176,7 +199,7 @@ export default function DriversPage() {
         emptyTitle="No drivers yet"
         emptyDescription="Invite a driver to start assigning trucks and trips."
         emptyAction={
-          isAdmin ? (
+          canInvite ? (
             <Button onClick={() => setInviteOpen(true)}>
               <UserPlus />
               Invite driver

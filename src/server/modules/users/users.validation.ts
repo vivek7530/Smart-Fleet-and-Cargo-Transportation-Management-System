@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ROLES, USER_STATUSES } from '../../types/enums';
 import { optionalEmailField, optionalMobileField } from '../../lib/contact';
+import { objectId } from '../shared';
 import { listQuerySchema } from '../../lib/pagination';
 
 export const inviteUserSchema = z
@@ -13,6 +14,11 @@ export const inviteUserSchema = z
     }),
     /** Which channel to deliver through when both contacts are supplied. */
     channel: z.enum(['EMAIL', 'MOBILE']).optional(),
+    /**
+     * DRIVER only: the manager the new driver works under. Sent at invite time
+     * so the driver is never created as an orphan nobody can see.
+     */
+    manager: objectId.nullable().optional(),
   })
   // At least one contact method is required — neither one alone is mandatory.
   .refine((data) => Boolean(data.email || data.mobile), {
@@ -52,6 +58,8 @@ export const updateUserSchema = z.object({
   experienceYears: z.coerce.number().min(0).max(60).optional(),
   emergencyContactName: z.string().trim().max(120).optional(),
   emergencyContactPhone: z.string().trim().max(30).optional(),
+  /** DRIVER only. `null` detaches the driver from their current manager. */
+  manager: objectId.nullable().optional(),
 });
 
 export const objectIdParamSchema = z.object({

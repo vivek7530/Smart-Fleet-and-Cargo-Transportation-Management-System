@@ -20,6 +20,8 @@ export interface InvitationDocument extends Document {
   tokenHash: string;
   tokenPreview: string;
   invitedBy: Types.ObjectId;
+  /** DRIVER invites only: the manager the new driver will work under. */
+  manager?: Types.ObjectId | null;
   user?: Types.ObjectId | null;
   status: InvitationStatus;
   expiresAt: Date;
@@ -41,6 +43,7 @@ const invitationSchema = new Schema<InvitationDocument>(
     tokenHash: { type: String, required: true, unique: true, index: true },
     tokenPreview: { type: String, required: true },
     invitedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    manager: { type: Schema.Types.ObjectId, ref: 'User', default: null },
     user: { type: Schema.Types.ObjectId, ref: 'User', default: null },
     status: { type: String, enum: INVITATION_STATUSES, default: 'PENDING', index: true },
     expiresAt: { type: Date, required: true, index: true },

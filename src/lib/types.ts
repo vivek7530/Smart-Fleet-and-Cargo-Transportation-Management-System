@@ -179,6 +179,45 @@ export interface ShareRef {
   sharedAt: string;
 }
 
+/** One row inside a manager's group on the admin fleet-by-manager view. */
+export interface ManagerFleetTruck {
+  id: string;
+  truckNumber: string;
+  registrationNumber: string;
+  make: string;
+  model: string;
+  year: number;
+  capacityTons: number;
+  status: TruckStatus;
+  assignedDriver: { id: string; name: string; avatarColor?: string } | null;
+  /** How many other managers this truck was shared with. */
+  shareCount: number;
+  createdAt: string;
+}
+
+export interface ManagerFleetGroup {
+  manager: {
+    id: string;
+    name: string;
+    email?: string | null;
+    mobile?: string | null;
+    avatarColor?: string;
+    status: UserStatus;
+  };
+  truckCount: number;
+  byStatus: Partial<Record<TruckStatus, number>>;
+  /** Trucks another manager owns that were shared with this one. */
+  sharedInCount: number;
+  trucks: ManagerFleetTruck[];
+}
+
+export interface ManagerFleetReport {
+  groups: ManagerFleetGroup[];
+  /** Trucks nobody holds yet. */
+  unassigned: ManagerFleetTruck[];
+  totals: { managers: number; trucks: number; assigned: number; unassigned: number };
+}
+
 export interface Cargo {
   id: string;
   cargoCode: string;

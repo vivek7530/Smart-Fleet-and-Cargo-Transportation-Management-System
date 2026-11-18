@@ -34,15 +34,25 @@ import { InviteUserDialog } from './invite-dialog';
 const ROLES = ['ADMIN', 'MANAGER', 'DRIVER'];
 const STATUSES = ['ACTIVE', 'INVITED', 'SUSPENDED'];
 
+/** An extra tab a page can hang off this view — see /managers and its fleet tab. */
+export interface ExtraTab {
+  value: string;
+  label: string;
+  icon?: React.ReactNode;
+  content: React.ReactNode;
+}
+
 /** Shared by /users (everyone) and /managers (role-filtered). */
 export function UsersView({
   title,
   description,
   fixedRole,
+  extraTabs = [],
 }: {
   title: string;
   description: string;
   fixedRole?: Extract<Role, 'MANAGER' | 'DRIVER'>;
+  extraTabs?: ExtraTab[];
 }) {
   const queryClient = useQueryClient();
   const list = useListState({ defaultSort: 'createdAt', filterKeys: ['role', 'status'] });
@@ -180,6 +190,12 @@ export function UsersView({
             <Mail />
             Invitations
           </TabsTrigger>
+          {extraTabs.map((tab) => (
+            <TabsTrigger key={tab.value} value={tab.value}>
+              {tab.icon}
+              {tab.label}
+            </TabsTrigger>
+          ))}
         </TabsList>
 
         <TabsContent value="people" className="mt-4 space-y-5">
@@ -282,6 +298,12 @@ export function UsersView({
         <TabsContent value="invitations" className="mt-4">
           <InvitationsList role={fixedRole} />
         </TabsContent>
+
+        {extraTabs.map((tab) => (
+          <TabsContent key={tab.value} value={tab.value} className="mt-4">
+            {tab.content}
+          </TabsContent>
+        ))}
       </Tabs>
 
       <InviteUserDialog open={inviteOpen} onOpenChange={setInviteOpen} defaultRole={fixedRole ?? 'DRIVER'} />

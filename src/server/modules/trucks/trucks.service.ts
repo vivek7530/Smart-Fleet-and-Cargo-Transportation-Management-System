@@ -30,6 +30,7 @@ import {
   type ActorLike,
   type OwnedLike,
 } from '../../lib/ownership';
+import type { TruckStatus } from '../../types/enums';
 import type { CreateTruckInput, UpdateTruckInput } from './trucks.validation';
 
 const SEARCH_FIELDS = ['truckNumber', 'registrationNumber', 'make', 'model', 'insuranceProvider'];
@@ -421,3 +422,169 @@ function isDateField(key: string) {
 }
 
 
+
+/* ------------------------------------------------------------------------- *
+ * The administrator's manager-by-manager view of the fleet.
+ * ------------------------------------------------------------------------- */
+
+/** One truck as it appears inside a manager's group — the list columns, no more. */
+export interface ManagerFleetTruck {
+  id: string;
+  truckNumber: string;
+  registrationNumber: string;
+  make: string;
+  model: string;
+  year: number;
+  capacityTons: number;
+  status: TruckStatus;
+  assignedDriver: { id: string; name: string; avatarColor?: string } | null;
+  /** How many other managers this truck was shared with. */
+  shareCount: number;
+  createdAt: Date;
+}
+
+export interface ManagerFleetGroup {
+  manager: {
+    id: string;
+    name: string;
+    email?: string | null;
+    mobile?: string | null;
+    avatarColor?: string;
+    status: string;
+  };
+  truckCount: number;
+  /** Only the statuses actually present, so the UI renders no empty chips. */
+  byStatus: Record<string, number>;
+  /** Trucks another manager owns that were shared with this one. */
+  sharedInCount: number;
+  trucks: ManagerFleetTruck[];
+}
+
+export interface ManagerFleetReport {
+  groups: ManagerFleetGroup[];
+  /** Trucks nobody holds — the red flag an administrator has to resolve. */
+  unassigned: ManagerFleetTruck[];
+  totals: { managers: number; trucks: number; assigned: number; unassigned: number };
+}
+
+type LeanFleetTruck = {
+  _id: Types.ObjectId;
+  truckNumber: string;
+  registrationNumber: string;
+  make: string;
+  model: string;
+  year: number;
+  capacityTons: number;
+  status: TruckStatus;
+  owner?: Types.ObjectId | null;
+  assignedDriver?: { _id: Types.ObjectId; name: string; avatarColor?: string } | null;
+  sharedWith?: { user: Types.ObjectId }[];
+  createdAt: Date;
+};
+
+/**
+ * Every manager with the trucks they hold, listed in full.
+ *
+ * Administrators only — a manager asking this question would be asking which
+ * trucks *other* managers hold, which is exactly what per-manager ownership
+ * exists to prevent. The route guards that; this function assumes it.
+ *
+ * Grouping happens in memory rather than through `$lookup` because both sides
+ * are small (managers, and one fleet) and a single pass keeps the whole report
+ * consistent: the counts and the rows below them come from the same read.
+ */
+export async function listFleetByManager(): Promise<ManagerFleetReport> {
+  const [managers, trucks] = await Promise.all([
+    User.find({ role: 'MANAGER', status: { $ne: 'ARCHIVED' } })
+      .select('name email mobile avatarColor status')
+      .sort({ name: 1 })
+      .lean(),
+    Truck.find({})
+      .select('truckNumber registrationNumber make model year capacityTons status owner assignedDriver sharedWith createdAt')
+      .populate('assignedDriver', 'name avatarColor')
+      .sort({ truckNumber: 1 })
+      .lean<LeanFleetTruck[]>(),
+  ]);
+
+  const shape = (truck: LeanFleetTruck): ManagerFleetTruck => ({
+    id: String(truck._id),
+    truckNumber: truck.truckNumber,
+    registrationNumber: truck.registrationNumber,
+    make: truck.make,
+    model: truck.model,
+    year: truck.year,
+    capacityTons: truck.capacityTons,
+    status: truck.status,
+    assignedDriver: truck.assignedDriver
+      ? {
+          id: String(truck.assignedDriver._id),
+          name: truck.assignedDriver.name,
+          avatarColor: truck.assignedDriver.avatarColor,
+        }
+      : null,
+    shareCount: truck.sharedWith?.length ?? 0,
+    createdAt: truck.createdAt,
+  });
+
+  const owned = new Map<string, ManagerFleetTruck[]>();
+  const sharedIn = new Map<string, number>();
+  const unassigned: ManagerFleetTruck[] = [];
+
+  for (const truck of trucks) {
+    const row = shape(truck);
+    const ownerId = truck.owner ? String(truck.owner) : null;
+
+    if (ownerId) {
+      const bucket = owned.get(ownerId);
+      if (bucket) bucket.push(row);
+      else owned.set(ownerId, [row]);
+    } else {
+      unassigned.push(row);
+    }
+
+    for (const share of truck.sharedWith ?? []) {
+      if (!share?.user) continue;
+      const sharee = String(share.user);
+      // A share back to the owner would double-count; ownership already covers it.
+      if (sharee === ownerId) continue;
+      sharedIn.set(sharee, (sharedIn.get(sharee) ?? 0) + 1);
+    }
+  }
+
+  const groups: ManagerFleetGroup[] = managers.map((manager) => {
+    const id = String(manager._id);
+    const list = owned.get(id) ?? [];
+    const byStatus: Record<string, number> = {};
+    for (const truck of list) byStatus[truck.status] = (byStatus[truck.status] ?? 0) + 1;
+
+    return {
+      manager: {
+        id,
+        name: manager.name,
+        email: manager.email ?? null,
+        mobile: manager.mobile ?? null,
+        avatarColor: manager.avatarColor,
+        status: manager.status,
+      },
+      truckCount: list.length,
+      byStatus,
+      sharedInCount: sharedIn.get(id) ?? 0,
+      trucks: list,
+    };
+  });
+
+  // Busiest managers first; an empty-handed manager still appears, at the end,
+  // because "this manager holds nothing" is itself worth seeing.
+  groups.sort((a, b) => b.truckCount - a.truckCount || a.manager.name.localeCompare(b.manager.name));
+
+  return {
+    groups,
+    unassigned,
+    totals: {
+      managers: groups.length,
+      trucks: trucks.length,
+      assigned: trucks.length - unassigned.length,
+      unassigned: unassigned.length,
+    },
+  };
+}

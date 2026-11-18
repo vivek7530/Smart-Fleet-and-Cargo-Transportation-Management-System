@@ -58,6 +58,7 @@ export async function listDrivers(query: z.infer<typeof listDriversQuerySchema>,
     cursor: query.cursor,
     sortBy,
     sortDir,
+    populate: { path: 'manager', select: 'name avatarColor' },
   });
 
   // Decorate the page with the assigned truck and live trip counters.

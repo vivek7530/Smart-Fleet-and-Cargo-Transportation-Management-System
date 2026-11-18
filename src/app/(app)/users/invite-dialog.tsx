@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -10,12 +10,14 @@ import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { formatDate } from '@/lib/format';
-import type { Invitation, Role } from '@/lib/types';
+import type { Invitation, Page, Role, UserRecord } from '@/lib/types';
 import { ResourceDialog, useMutationErrors } from '@/components/data/resource-dialog';
 import { FormField } from '@/components/ui/form-field';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useAuth } from '@/components/auth-provider';
 
 /**
  * At least one contact method is required, but neither is mandatory on its own.
@@ -34,6 +36,8 @@ const inviteSchema = z
     ]),
     role: z.enum(['MANAGER', 'DRIVER']),
     channel: z.enum(['EMAIL', 'MOBILE']),
+    /** Drivers only; '' means the administrator left it for later. */
+    manager: z.string(),
   })
   .refine((data) => Boolean(data.email || data.mobile), {
     message: 'Provide an email address or a mobile number',
@@ -70,7 +74,7 @@ export function InviteUserDialog({
 
   const form = useForm<InviteValues>({
     resolver: zodResolver(inviteSchema),
-    defaultValues: { name: '', email: '', mobile: '', role: defaultRole, channel: 'EMAIL' },
+    defaultValues: { name: '', email: '', mobile: '', role: defaultRole, channel: 'EMAIL', manager: '' },
   });
 
   const { bannerError, setBannerError, handleError } = useMutationErrors<keyof InviteValues>((field, message) =>
@@ -86,7 +90,7 @@ export function InviteUserDialog({
     }
     setResult(null);
     setBannerError(null);
-    form.reset({ name: '', email: '', mobile: '', role: defaultRole, channel: 'EMAIL' });
+    form.reset({ name: '', email: '', mobile: '', role: defaultRole, channel: 'EMAIL', manager: '' });
   }, [open, defaultRole, form, setBannerError]);
 
   const mutation = useMutation({
@@ -97,6 +101,8 @@ export function InviteUserDialog({
         mobile: values.mobile || undefined,
         role: values.role,
         channel: values.channel,
+        // Only ever sent for a driver; the server ignores it otherwise.
+        manager: values.role === 'DRIVER' && values.manager ? values.manager : undefined,
       }),
     onSuccess(data) {
       queryClient.invalidateQueries({ queryKey: ['/users'] });
@@ -110,7 +116,19 @@ export function InviteUserDialog({
   });
 
   const channel = form.watch('channel');
+  const role = form.watch('role');
   const errors = form.formState.errors;
+
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'ADMIN';
+
+  // Only an administrator chooses; a manager's own drivers land on their roster
+  // server-side, so the list is never fetched for them.
+  const { data: managers } = useQuery({
+    queryKey: ['/users', 'manager-options'],
+    queryFn: () => api.get<Page<UserRecord>>('/users', { role: 'MANAGER', status: 'ACTIVE', limit: 100 }),
+    enabled: open && isAdmin,
+  });
 
   if (result) return <InvitationCreated open={open} result={result} onClose={() => onOpenChange(false)} />;
 
@@ -130,29 +148,69 @@ export function InviteUserDialog({
     >
       <FormField label="Role" required>
         <div className="grid grid-cols-2 gap-2">
-          {(['MANAGER', 'DRIVER'] as const).map((role) => (
-            <button
-              key={role}
-              type="button"
-              onClick={() => form.setValue('role', role)}
-              className={cn(
-                'rounded-lg border px-3 py-2.5 text-left transition-colors focus-ring',
-                form.watch('role') === role
-                  ? 'border-primary bg-primary-soft'
-                  : 'border-input hover:bg-accent/60',
-              )}
-            >
-              <span className="flex items-center gap-2 text-[13px] font-medium">
-                <UserPlus className="size-3.5" />
-                {role === 'MANAGER' ? 'Manager' : 'Driver'}
-              </span>
-              <span className="mt-0.5 block text-2xs text-muted-foreground">
-                {role === 'MANAGER' ? 'Runs day-to-day operations' : 'Drives and reports from the road'}
-              </span>
-            </button>
-          ))}
+          {(['MANAGER', 'DRIVER'] as const).map((option) => {
+            // A manager may only onboard drivers, so the other card is inert.
+            const locked = !isAdmin && option === 'MANAGER';
+            return (
+              <button
+                key={option}
+                type="button"
+                disabled={locked}
+                onClick={() => form.setValue('role', option)}
+                className={cn(
+                  'rounded-lg border px-3 py-2.5 text-left transition-colors focus-ring',
+                  role === option ? 'border-primary bg-primary-soft' : 'border-input hover:bg-accent/60',
+                  locked && 'cursor-not-allowed opacity-50 hover:bg-transparent',
+                )}
+              >
+                <span className="flex items-center gap-2 text-[13px] font-medium">
+                  <UserPlus className="size-3.5" />
+                  {option === 'MANAGER' ? 'Manager' : 'Driver'}
+                </span>
+                <span className="mt-0.5 block text-2xs text-muted-foreground">
+                  {option === 'MANAGER'
+                    ? locked
+                      ? 'Administrators only'
+                      : 'Runs day-to-day operations'
+                    : 'Drives and reports from the road'}
+                </span>
+              </button>
+            );
+          })}
         </div>
       </FormField>
+
+      {role === 'DRIVER' ? (
+        isAdmin ? (
+          <FormField
+            label="Works under"
+            error={errors.manager?.message}
+            hint="The manager who will see this driver, their trips and their claims. Can be set later."
+          >
+            <Select
+              value={form.watch('manager') || 'NONE'}
+              onValueChange={(value) => form.setValue('manager', value === 'NONE' ? '' : value)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Choose a manager" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="NONE">No manager yet</SelectItem>
+                {(managers?.items ?? []).map((manager) => (
+                  <SelectItem key={manager.id} value={manager.id}>
+                    {manager.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </FormField>
+        ) : (
+          <div className="rounded-lg border bg-muted/40 px-3.5 py-2.5 text-xs leading-relaxed text-muted-foreground">
+            This driver joins <span className="font-medium text-foreground">your</span> roster — only you and
+            the administrators will see them.
+          </div>
+        )
+      ) : null}
 
       <FormField label="Full name" htmlFor="invite-name" required error={errors.name?.message}>
         <Input
