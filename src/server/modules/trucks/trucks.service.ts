@@ -30,7 +30,7 @@ import {
   type ActorLike,
   type OwnedLike,
 } from '../../lib/ownership';
-import type { TruckStatus } from '../../types/enums';
+import type { SharePermission, TruckStatus } from '../../types/enums';
 import type { CreateTruckInput, UpdateTruckInput } from './trucks.validation';
 
 const SEARCH_FIELDS = ['truckNumber', 'registrationNumber', 'make', 'model', 'insuranceProvider'];
@@ -87,7 +87,8 @@ export async function listTrucks(query: TruckListQuery, user: ActorLike) {
 export async function getTruck(id: string, user: ActorLike) {
   const truck = await Truck.findById(id)
     .populate('assignedDriver', 'name mobile email avatarColor licenseNumber')
-    .populate('owner', 'name avatarColor role');
+    .populate('owner', 'name avatarColor role')
+    .populate('sharedWith.user', 'name avatarColor role');
   if (!truck) throw ApiError.notFound('That truck could not be found');
   assertCanSee(truck, user, 'truck');
 
@@ -166,6 +167,8 @@ export async function createTruck(input: CreateTruckInput, ctx: Ctx) {
 
   const truck = await Truck.create({
     ...rest,
+    // One number is entered and both are expected to match.
+    registrationNumber: input.registrationNumber ?? input.truckNumber,
     status: input.assignedDriver ? 'ASSIGNED' : input.status,
     owner,
     ownerHistory: owner ? [{ owner, from: new Date(), to: null }] : [],
@@ -223,7 +226,16 @@ export async function updateTruck(id: string, input: UpdateTruckInput, ctx: Ctx)
     }
   }
 
+  // The form no longer asks for the registration, so keep it in step with the
+  // truck number for every record where the two were already the same. A truck
+  // whose plate genuinely differs keeps its own value.
+  const mirrored = truck.registrationNumber === truck.truckNumber;
+
   Object.assign(truck, sanitiseTruckPatch(input));
+
+  if (input.registrationNumber === undefined && mirrored && input.truckNumber) {
+    truck.registrationNumber = truck.truckNumber;
+  }
   if (input.assignedDriver !== undefined) {
     truck.assignedDriver = input.assignedDriver ? (input.assignedDriver as unknown as TruckDocument['assignedDriver']) : null;
     if (!input.status) {
@@ -365,7 +377,7 @@ export async function getAssignedTruckFor(driverId: string) {
 
 /** An owner must be a manager who can actually take responsibility today. */
 async function assertOwnerIsManager(ownerId: string) {
-  const manager = await User.findOne({ _id: ownerId, role: 'MANAGER' }).select('status');
+  const manager = await User.findOne({ _id: ownerId, role: 'MANAGER' }).select('status name');
   if (!manager) throw ApiError.badRequest('The selected owner is not a manager');
   if (manager.status !== 'ACTIVE') throw ApiError.badRequest('Only an active manager can own a truck');
   return manager;
@@ -831,4 +843,131 @@ export async function transferTruck(
     driverDetached,
     driverMoved,
   };
+}
+
+/* -------------------------------------------------------------------------- *
+ * Sharing
+ * -------------------------------------------------------------------------- */
+
+/**
+ * Grants another manager access to a truck, or changes the access they have.
+ *
+ * Every read path in the system has honoured `sharedWith` since ownership
+ * landed — `ownerScopeFor` matches it, `permissionFor` ranks it, redaction
+ * respects it — but nothing could create one. This is that missing half.
+ *
+ * Two rules decide the shape of this:
+ *
+ *   - An administrator shares, nobody else. A manager who could share their own
+ *     truck could hand another manager's driver a route into their fleet, and
+ *     the audit trail would show the sharing manager rather than whoever
+ *     actually wanted the access.
+ *   - A trip carries its truck's shares, denormalised, so that the trip list
+ *     stays a single indexed query. That copy has to be kept in step here, or
+ *     the sharee sees the truck and none of its work.
+ *
+ * VIEW is operational: the sharee sees the truck, its trips and its records,
+ * with the money stripped server-side. EDIT is the full thing, short of
+ * ownership itself — they still cannot transfer it or share it onward.
+ */
+export async function shareTruck(
+  id: string,
+  input: { user: string; permission: SharePermission },
+  ctx: Ctx,
+) {
+  const actor = ctx.user;
+  if (!isAdmin(actor)) throw ApiError.forbidden('Only an administrator can share a truck');
+
+  const truck = await Truck.findById(id);
+  if (!truck) throw ApiError.notFound('That truck could not be found');
+
+  if (refId(truck.owner) === null) {
+    throw ApiError.badRequest('Give this truck an owner before sharing it');
+  }
+  if (refId(truck.owner) === input.user) {
+    throw ApiError.badRequest('This truck already belongs to that manager');
+  }
+
+  const manager = await assertOwnerIsManager(input.user);
+
+  const existing = truck.sharedWith.find((share) => refId(share.user) === input.user);
+  if (existing) {
+    if (existing.permission === input.permission) return truck;
+    existing.permission = input.permission;
+    existing.sharedBy = actor._id;
+    existing.sharedAt = new Date();
+  } else {
+    truck.sharedWith.push({
+      user: manager._id,
+      permission: input.permission,
+      sharedBy: actor._id,
+      sharedAt: new Date(),
+    });
+  }
+
+  await truck.save();
+  await syncTripShares(truck);
+
+  await recordAudit({
+    ctx,
+    action: 'TRUCK_UPDATED',
+    summary: `${actor.name} shared truck ${truck.truckNumber} with ${manager.name} at ${input.permission}`,
+    entity: 'Truck',
+    entityId: truck._id,
+    metadata: { sharedWith: input.user, permission: input.permission },
+  });
+
+  await notify({
+    users: [manager._id],
+    type: 'GENERAL',
+    title: 'A truck was shared with you',
+    message: `${truck.truckNumber} is now visible to you${input.permission === 'VIEW' ? ' for viewing' : ''}.`,
+  });
+
+  return truck;
+}
+
+/** Takes a share back. The truck's own manager is untouched. */
+export async function unshareTruck(id: string, userId: string, ctx: Ctx) {
+  const actor = ctx.user;
+  if (!isAdmin(actor)) throw ApiError.forbidden('Only an administrator can change who a truck is shared with');
+
+  const truck = await Truck.findById(id);
+  if (!truck) throw ApiError.notFound('That truck could not be found');
+
+  const before = truck.sharedWith.length;
+  truck.sharedWith = truck.sharedWith.filter((share) => refId(share.user) !== userId);
+  if (truck.sharedWith.length === before) {
+    throw ApiError.badRequest('This truck is not shared with that manager');
+  }
+
+  await truck.save();
+  await syncTripShares(truck);
+
+  const manager = await User.findById(userId).select('name').lean();
+  await recordAudit({
+    ctx,
+    action: 'TRUCK_UPDATED',
+    summary: `${actor.name} stopped sharing truck ${truck.truckNumber} with ${manager?.name ?? 'a manager'}`,
+    entity: 'Truck',
+    entityId: truck._id,
+    metadata: { unsharedWith: userId },
+  });
+
+  return truck;
+}
+
+/**
+ * Pushes a truck's share list down onto its trips.
+ *
+ * The denormalised copy is what makes the trip list one indexed query instead
+ * of a lookup per row, and it is only correct for as long as something keeps it
+ * in step. Completed and cancelled trips are left alone: they are history, and
+ * a share granted today should not retroactively open last year's books.
+ */
+async function syncTripShares(truck: TruckDocument) {
+  await Trip.updateMany(
+    { truck: truck._id, status: { $nin: ['COMPLETED', 'CANCELLED'] } },
+    { $set: { sharedWith: truck.sharedWith } },
+  );
 }

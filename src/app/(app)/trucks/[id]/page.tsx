@@ -3,7 +3,7 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft,
   CalendarClock,
@@ -13,9 +13,11 @@ import {
   Pencil,
   Route,
   Truck as TruckIcon,
+  Users,
   Wrench,
 } from '@/components/icons';
-import { api } from '@/lib/api';
+import { toast } from 'sonner';
+import { api, errorMessage } from '@/lib/api';
 import { formatCurrency, formatDate, formatNumber, formatWeight } from '@/lib/format';
 import { humanise } from '@/lib/utils';
 import type {
@@ -28,6 +30,10 @@ import type {
 import { PageHeader } from '@/components/data/list-toolbar';
 import { MiniStat } from '@/components/data/stat-card';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useAuth } from '@/components/auth-provider';
+import { useFleetFilterOptions } from '@/hooks/use-fleet-filters';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Avatar, Separator, Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/misc';
 import { StatusBadge } from '@/components/ui/status-badge';
@@ -142,7 +148,13 @@ export default function TruckDetailPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
-              <MiniStat label="Registration" value={truck.registrationNumber} />
+              {/* The plate repeats the truck number on most records here, so it only
+                  earns a tile when it genuinely differs. */}
+              {truck.registrationNumber !== truck.truckNumber ? (
+                <MiniStat label="Registration" value={truck.registrationNumber} />
+              ) : (
+                <MiniStat label="Year" value={truck.year} />
+              )}
               <MiniStat label="Capacity" value={formatWeight(truck.capacityTons)} />
               <MiniStat label="Odometer" value={`${formatNumber(truck.odometerKm)} km`} />
               <MiniStat label="Fuel type" value={humanise(truck.fuelType)} />
@@ -187,6 +199,10 @@ export default function TruckDetailPage() {
                 ) : null}
               </>
             ) : null}
+
+            <Separator />
+
+            <SharedWith truck={truck} />
 
             {truck.notes ? (
               <>
@@ -390,3 +406,149 @@ function TruckDetailSkeleton() {
   );
 }
 
+/**
+ * The managers this truck is shared with, and — for an administrator — the
+ * controls to change that.
+ *
+ * Sharing has been honoured on every read path since ownership landed, but
+ * nothing could create a share, so the feature existed only in the access
+ * rules. A manager sees who else is on the truck without being able to change
+ * it: letting them share their own truck onward would let access spread
+ * sideways with the wrong name in the audit trail.
+ *
+ * VIEW is spelled out rather than left to the badge, because the difference
+ * between the two is money: a VIEW sharee gets the operational detail with the
+ * figures stripped server-side.
+ */
+function SharedWith({ truck }: { truck: Truck }) {
+  const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'ADMIN';
+
+  const { managerOptions } = useFleetFilterOptions({ enabled: isAdmin });
+  const shares = truck.sharedWith ?? [];
+
+  const [adding, setAdding] = React.useState('NONE');
+  const [permission, setPermission] = React.useState<'VIEW' | 'EDIT'>('VIEW');
+
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ['truck', truck.id] });
+    queryClient.invalidateQueries({ queryKey: ['/trucks'] });
+    queryClient.invalidateQueries({ queryKey: ['/trucks/by-manager'] });
+  };
+
+  const share = useMutation({
+    mutationFn: (input: { user: string; permission: string }) =>
+      api.post(`/trucks/${truck.id}/share`, input),
+    onSuccess() {
+      refresh();
+      setAdding('NONE');
+      toast.success('Truck shared');
+    },
+    onError: (error) => toast.error(errorMessage(error, 'Could not share this truck.')),
+  });
+
+  const unshare = useMutation({
+    mutationFn: (userId: string) => api.delete(`/trucks/${truck.id}/share?user=${userId}`),
+    onSuccess() {
+      refresh();
+      toast.success('Sharing stopped');
+    },
+    onError: (error) => toast.error(errorMessage(error, 'Could not change this share.')),
+  });
+
+  // The owner is not a sharee, and neither is anyone already on the list.
+  const choices = managerOptions.filter(
+    (option) =>
+      option.value !== 'ALL' &&
+      option.value !== truck.owner?.id &&
+      !shares.some((entry) => entry.user.id === option.value),
+  );
+
+  return (
+    <div className="space-y-3">
+      <p className="flex items-center gap-1.5 text-2xs font-semibold uppercase tracking-wide text-muted-foreground">
+        <Users className="size-3.5" />
+        Shared with
+      </p>
+
+      {shares.length === 0 ? (
+        <p className="text-[13px] text-muted-foreground">
+          Only {truck.owner?.name ?? 'nobody'} can see this truck.
+        </p>
+      ) : (
+        <ul className="space-y-2">
+          {shares.map((entry) => (
+            <li key={entry.user.id} className="flex items-center gap-2">
+              <Avatar name={entry.user.name} color={entry.user.avatarColor} size="xs" />
+              <span className="min-w-0 flex-1 truncate text-[13px]">{entry.user.name}</span>
+              <Badge variant={entry.permission === 'EDIT' ? 'info' : 'neutral'} size="sm">
+                {entry.permission === 'EDIT' ? 'can edit' : 'view only'}
+              </Badge>
+              {isAdmin ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 text-xs text-muted-foreground"
+                  disabled={unshare.isPending}
+                  onClick={() => unshare.mutate(entry.user.id)}
+                >
+                  Remove
+                </Button>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {isAdmin && truck.owner ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Select value={adding} onValueChange={setAdding} disabled={share.isPending || choices.length === 0}>
+            <SelectTrigger className="h-8 w-auto min-w-[9.5rem] flex-1">
+              <SelectValue placeholder={choices.length ? 'Add a manager' : 'Nobody left to add'} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="NONE" disabled>
+                Add a manager
+              </SelectItem>
+              {choices.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select value={permission} onValueChange={(value) => setPermission(value as 'VIEW' | 'EDIT')}>
+            <SelectTrigger className="h-8 w-auto min-w-[7.5rem]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="VIEW">View only</SelectItem>
+              <SelectItem value="EDIT">Can edit</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <Button
+            size="sm"
+            disabled={adding === 'NONE' || share.isPending}
+            loading={share.isPending}
+            onClick={() => share.mutate({ user: adding, permission })}
+          >
+            Share
+          </Button>
+        </div>
+      ) : null}
+
+      {isAdmin && !truck.owner ? (
+        <p className="text-xs text-muted-foreground">Give this truck an owner before sharing it.</p>
+      ) : null}
+
+      {isAdmin && shares.length > 0 ? (
+        <p className="text-xs text-muted-foreground">
+          A view-only manager sees the truck and its trips with the figures removed.
+        </p>
+      ) : null}
+    </div>
+  );
+}

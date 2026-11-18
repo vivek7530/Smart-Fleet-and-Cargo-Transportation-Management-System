@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { FUEL_TYPES, TRUCK_STATUSES } from '../../types/enums';
+import { FUEL_TYPES, SHARE_PERMISSIONS, TRUCK_STATUSES } from '../../types/enums';
 import { listQuerySchema } from '../../lib/pagination';
 
 const objectId = z.string().regex(/^[a-f\d]{24}$/i, 'That identifier is not valid');
@@ -7,7 +7,13 @@ const optionalDate = z.string().datetime().or(z.string().date()).nullable().opti
 
 export const createTruckSchema = z.object({
   truckNumber: z.string().trim().min(3, 'Truck number is required').max(24).toUpperCase(),
-  registrationNumber: z.string().trim().min(4, 'Registration number is required').max(24).toUpperCase(),
+  /**
+   * The RTO plate. In this fleet it is the truck number — operators enter one
+   * value and expect both to match — so the form no longer asks twice and the
+   * service fills it in. It stays a field of its own because the two genuinely
+   * can differ, and older records here already do.
+   */
+  registrationNumber: z.string().trim().min(4).max(24).toUpperCase().optional(),
   make: z.string().trim().min(1, 'Make is required').max(60),
   model: z.string().trim().min(1, 'Model is required').max(60),
   year: z.coerce
@@ -68,3 +74,11 @@ export const transferTruckSchema = z.object({
 });
 
 export type TransferTruckInput = z.infer<typeof transferTruckSchema>;
+
+/** Granting another manager access to a truck, or changing the access given. */
+export const shareTruckSchema = z.object({
+  user: objectId,
+  permission: z.enum(SHARE_PERMISSIONS).default('VIEW'),
+});
+
+export type ShareTruckInput = z.infer<typeof shareTruckSchema>;

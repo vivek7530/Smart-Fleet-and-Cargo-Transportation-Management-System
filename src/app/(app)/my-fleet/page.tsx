@@ -168,7 +168,9 @@ function TrucksPanel({ trucks }: { trucks: MyFleetTruck[] }) {
           >
             <div className="min-w-[140px] flex-1">
               <p className="truncate font-medium tabular">{truck.truckNumber}</p>
-              <p className="truncate text-xs text-muted-foreground tabular">{truck.registrationNumber}</p>
+              {truck.registrationNumber !== truck.truckNumber ? (
+                <p className="truncate text-xs text-muted-foreground tabular">{truck.registrationNumber}</p>
+              ) : null}
             </div>
 
             <div className="min-w-[130px] flex-1 text-sm">

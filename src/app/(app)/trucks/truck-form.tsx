@@ -29,7 +29,6 @@ const FUEL_TYPES = ['DIESEL', 'PETROL', 'CNG', 'LNG', 'ELECTRIC'] as const;
 
 const truckSchema = z.object({
   truckNumber: z.string().trim().min(3, 'Truck number is required').max(24),
-  registrationNumber: z.string().trim().min(4, 'Registration number is required').max(24),
   make: z.string().trim().min(1, 'Make is required').max(60),
   model: z.string().trim().min(1, 'Model is required').max(60),
   year: z.coerce
@@ -65,7 +64,6 @@ type TruckValues = z.infer<typeof truckSchema>;
 
 const emptyValues: TruckValues = {
   truckNumber: '',
-  registrationNumber: '',
   make: '',
   model: '',
   year: new Date().getFullYear(),
@@ -147,7 +145,6 @@ export function TruckFormDialog({
       truck
         ? {
             truckNumber: truck.truckNumber,
-            registrationNumber: truck.registrationNumber,
             make: truck.make,
             model: truck.model,
             year: truck.year,
@@ -267,21 +264,6 @@ export function TruckFormDialog({
               className="uppercase"
               invalid={Boolean(errors.truckNumber)}
               {...form.register('truckNumber')}
-            />
-          </FormField>
-
-          <FormField
-            label="Registration number"
-            htmlFor="registrationNumber"
-            required
-            error={errors.registrationNumber?.message}
-          >
-            <Input
-              id="registrationNumber"
-              placeholder="MH12AB1234"
-              className="uppercase"
-              invalid={Boolean(errors.registrationNumber)}
-              {...form.register('registrationNumber')}
             />
           </FormField>
 

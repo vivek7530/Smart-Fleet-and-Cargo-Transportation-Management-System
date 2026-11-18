@@ -502,7 +502,9 @@ function TruckTable({ trucks }: { trucks: ManagerFleetTruck[] }) {
               <div className={cn('grid gap-3 lg:items-center', TRUCK_COLUMNS)}>
                 <div className="min-w-0">
                   <p className="truncate font-medium tabular">{truck.truckNumber}</p>
-                  <p className="truncate text-xs text-muted-foreground tabular">{truck.registrationNumber}</p>
+                  {truck.registrationNumber !== truck.truckNumber ? (
+                    <p className="truncate text-xs text-muted-foreground tabular">{truck.registrationNumber}</p>
+                  ) : null}
                 </div>
 
                 <div className="min-w-0 text-sm">
