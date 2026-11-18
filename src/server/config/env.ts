@@ -57,6 +57,13 @@ export const env = {
 
   invitationExpiresHours: num('INVITATION_EXPIRES_HOURS', 72),
 
+  /**
+   * Shared secret for the scheduled jobs under `/api/cron`. Unset means the
+   * endpoints answer only to a signed-in administrator, which is what you want
+   * in development; a scheduler needs it set to call them unattended.
+   */
+  cronSecret: process.env.CRON_SECRET ?? '',
+
   // Note: this system stores no files, images or video, and uses no object
   // storage. Documents are tracked as records only.
 

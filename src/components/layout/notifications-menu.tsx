@@ -28,6 +28,7 @@ const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   TRIP_STARTED: Route,
   TRIP_COMPLETED: Route,
   TRIP_CANCELLED: Route,
+  TRIP_STALLED: AlertTriangle,
   EXPENSE_SUBMITTED: IndianRupee,
   EXPENSE_APPROVED: IndianRupee,
   EXPENSE_REJECTED: IndianRupee,
@@ -48,6 +49,7 @@ const TONES: Record<string, string> = {
   DOCUMENT_EXPIRING: 'bg-warning-soft text-warning',
   TRIP_COMPLETED: 'bg-success-soft text-success',
   TRIP_CANCELLED: 'bg-destructive-soft text-destructive',
+  TRIP_STALLED: 'bg-warning-soft text-warning',
 };
 
 export function NotificationsMenu() {

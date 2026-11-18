@@ -153,6 +153,8 @@ export const NOTIFICATION_TYPES = [
   'TRIP_STARTED',
   'TRIP_COMPLETED',
   'TRIP_CANCELLED',
+  /** A trip the fleet has lost track of, still holding a truck and driver. */
+  'TRIP_STALLED',
   'EXPENSE_SUBMITTED',
   'EXPENSE_APPROVED',
   'EXPENSE_REJECTED',
