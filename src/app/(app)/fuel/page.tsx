@@ -355,7 +355,10 @@ function FuelFormDialog({
    */
   const tripChoices = React.useMemo(() => {
     const items = trips?.items ?? [];
-    if (isDriver) return items;
+    // Fuel goes into a truck, so a trip that has none cannot be the answer —
+    // offering it only produces "the selected trip does not use this truck"
+    // once the form is submitted.
+    if (isDriver) return items.filter((trip) => trip.truck);
     return items.filter((trip) => !selectedTruck || trip.truck?.id === selectedTruck);
   }, [trips, selectedTruck, isDriver]);
 
