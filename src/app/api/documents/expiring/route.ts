@@ -9,8 +9,8 @@ export const dynamic = 'force-dynamic';
 /** Powers the "documents expiring soon" widget on the dashboard. */
 export async function GET(request: NextRequest) {
   return handle(async () => {
-    await requireStaff(request);
+    const ctx = await requireStaff(request);
     const days = Number(request.nextUrl.searchParams.get('days') ?? 30) || 30;
-    return ok(await expiringDocuments(days));
+    return ok(await expiringDocuments(days, ctx.user));
   });
 }

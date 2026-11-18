@@ -6,6 +6,7 @@ import {
   financialsForPeriods,
   pickGranularity,
   rangeQuerySchema,
+  reportScopeFor,
   resolveRange,
 } from '@/server/services/reports.service';
 
@@ -15,14 +16,15 @@ export const dynamic = 'force-dynamic';
 /** Full report page — leaderboards and the expense breakdown are staff only. */
 export async function GET(request: NextRequest) {
   return handle(async () => {
-    await requireStaff(request);
+    const ctx = await requireStaff(request);
     const query = parseQuery(request, rangeQuerySchema);
     const range = resolveRange(query.preset, query.from, query.to);
     const granularity = pickGranularity(range, query.granularity);
 
+    const scope = await reportScopeFor(ctx.user);
     const [financialPeriods, leaderboards] = await Promise.all([
-      financialsForPeriods(range, undefined, granularity),
-      buildLeaderboards(range),
+      financialsForPeriods(range, undefined, granularity, scope),
+      buildLeaderboards(range, scope),
     ]);
 
     return ok({

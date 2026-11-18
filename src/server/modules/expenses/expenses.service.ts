@@ -13,11 +13,18 @@ import {
   searchFilter,
 } from '../../lib/pagination';
 import { recordAudit } from '../../services/audit.service';
-import { notify, toId, usersWithRoles } from '../../services/notification.service';
+import { notify, toId } from '../../services/notification.service';
 import { recalculateTripFinancials } from '../trips/trips.service';
 import { DRIVER_EXPENSE_TYPES, EXPENSE_STATUSES } from '../../types/enums';
 import { dateString, objectId } from '../shared';
 import type { Ctx } from '../../api/context';
+import {
+  recipientsForTrip,
+  requireTripAccess,
+  requireTruckAccess,
+  truckScopeFilter,
+} from '../../services/ownership.service';
+import { isAdmin, refId } from '../../lib/ownership';
 
 export const createExpenseSchema = z.object({
   type: z.enum(DRIVER_EXPENSE_TYPES, { errorMap: () => ({ message: 'Choose an expense type' }) }),
@@ -62,6 +69,8 @@ export async function listExpenses(query: z.infer<typeof listExpensesQuerySchema
   const filter = mergeFilters(
     // Drivers see only their own submissions.
     ctx.user.role === 'DRIVER' ? { driver: ctx.user._id } : query.driver ? { driver: query.driver } : null,
+    // An expense belongs to the truck whose trip it was filed against.
+    ctx.user.role === 'DRIVER' ? null : await truckScopeFilter(ctx.user),
     query.status ? { status: query.status } : null,
     query.type ? { type: query.type } : null,
     query.trip ? { trip: query.trip } : null,
@@ -80,7 +89,12 @@ export async function listExpenses(query: z.infer<typeof listExpensesQuerySchema
 }
 
 export async function expenseSummary(ctx: Ctx) {
-  const match = ctx.user.role === 'DRIVER' ? { driver: ctx.user._id } : {};
+  // Left unscoped this reports the whole company's pending spend to every
+  // manager, and drives the sidebar badge as well.
+  const match =
+    ctx.user.role === 'DRIVER'
+      ? { driver: ctx.user._id }
+      : ((await truckScopeFilter(ctx.user)) ?? {});
 
   const rows = await DriverExpense.aggregate<{ _id: string; count: number; amount: number }>([
     { $match: match },
@@ -101,6 +115,9 @@ export async function getExpense(id: string, ctx: Ctx) {
   if (ctx.user.role === 'DRIVER' && toId(expense.driver as never) !== String(ctx.user._id)) {
     throw ApiError.forbidden('That expense does not belong to you');
   }
+  if (ctx.user.role !== 'DRIVER' && expense.trip) {
+    await requireTripAccess(String(refId(expense.trip)), ctx.user, 'VIEW');
+  }
   return expense;
 }
 
@@ -118,7 +135,9 @@ export async function createExpense(input: z.infer<typeof createExpenseSchema>, 
 
   let truckId: unknown = null;
   if (input.trip) {
-    const trip = await Trip.findById(input.trip).select('driver truck tripCode status');
+    const trip = isDriver
+      ? await Trip.findById(input.trip).select('driver truck tripCode status')
+      : await requireTripAccess(input.trip, ctx.user);
     if (!trip) throw ApiError.badRequest('The selected trip could not be found');
     if (isDriver && String(trip.driver) !== String(ctx.user._id)) {
       throw ApiError.forbidden('That trip is not assigned to you');
@@ -157,7 +176,8 @@ export async function createExpense(input: z.infer<typeof createExpenseSchema>, 
   });
 
   await notify({
-    users: await usersWithRoles('ADMIN', 'MANAGER'),
+    // Only the manager who can actually approve this one, plus admins.
+    users: await recipientsForTrip(expense.trip ?? null),
     type: 'EXPENSE_SUBMITTED',
     title: 'New expense awaiting review',
     message: `${ctx.user.name} submitted a ₹${expense.amount} ${expense.type.toLowerCase()} expense.`,
@@ -177,6 +197,8 @@ export async function updateExpense(id: string, input: z.infer<typeof updateExpe
     if (String(expense.driver) !== String(ctx.user._id)) {
       throw ApiError.forbidden('That expense does not belong to you');
     }
+  } else if (expense.trip) {
+    await requireTripAccess(String(refId(expense.trip)), ctx.user);
   }
 
   if (expense.status !== 'PENDING') {
@@ -221,6 +243,15 @@ export async function reviewExpense(
   reason: string | undefined,
   ctx: Ctx,
 ) {
+  // Checked before the update, not after: approving another manager's expense
+  // and then objecting would already have moved the money.
+  const pending = await DriverExpense.findById(id).select('trip truck');
+  if (pending?.trip) {
+    await requireTripAccess(String(refId(pending.trip)), ctx.user);
+  } else if (pending?.truck && !isAdmin(ctx.user)) {
+    await requireTruckAccess(String(refId(pending.truck)), ctx.user);
+  }
+
   const expense = await DriverExpense.findOneAndUpdate(
     { _id: id, status: 'PENDING' },
     {
@@ -279,6 +310,10 @@ export async function deleteExpense(id: string, ctx: Ctx) {
 
   if (expense.status !== 'PENDING') {
     throw ApiError.conflict('Reviewed expenses cannot be deleted; use an audited correction');
+  }
+
+  if (ctx.user.role !== 'DRIVER' && expense.trip) {
+    await requireTripAccess(String(refId(expense.trip)), ctx.user);
   }
 
   if (ctx.user.role === 'DRIVER') {

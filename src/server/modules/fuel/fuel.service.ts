@@ -15,6 +15,7 @@ import { recordAudit } from '../../services/audit.service';
 import { recalculateTripFinancials } from '../trips/trips.service';
 import { dateString, objectId } from '../shared';
 import type { Ctx } from '../../api/context';
+import { requireTripAccess, requireTruckAccess, truckScopeFilter } from '../../services/ownership.service';
 import { advanceTruckOdometer } from '../../services/odometer.service';
 
 const PAYMENT_MODES = ['CASH', 'CARD', 'FUEL_CARD', 'CREDIT', 'UPI'] as const;
@@ -55,6 +56,8 @@ export async function listFuel(query: ListQuery, ctx: Ctx) {
   const filter = mergeFilters(
     // Drivers only ever see the fuel they recorded themselves.
     ctx.user.role === 'DRIVER' ? { driver: ctx.user._id } : query.driver ? { driver: query.driver } : null,
+    // Fuel belongs to the truck it went into.
+    ctx.user.role === 'DRIVER' ? null : await truckScopeFilter(ctx.user),
     query.truck ? { truck: query.truck } : null,
     query.trip ? { trip: query.trip } : null,
     query.paymentMode ? { paymentMode: query.paymentMode } : null,
@@ -73,12 +76,18 @@ export async function listFuel(query: ListQuery, ctx: Ctx) {
 }
 
 export async function createFuelRecord(input: z.infer<typeof createFuelSchema>, ctx: Ctx) {
-  const truck = await Truck.findById(input.truck).select('truckNumber assignedDriver odometerKm');
-  if (!truck) throw ApiError.badRequest('The selected truck could not be found');
-
-  // A driver may only log fuel against the truck they are responsible for.
-  if (ctx.user.role === 'DRIVER' && String(truck.assignedDriver) !== String(ctx.user._id)) {
-    throw ApiError.forbidden('You can only record fuel for the truck assigned to you');
+  // A driver may only log fuel against the truck they are responsible for; a
+  // manager, only against a truck they hold. Fuel also advances the truck's
+  // odometer, so this writes to the vehicle itself.
+  let truck;
+  if (ctx.user.role === 'DRIVER') {
+    truck = await Truck.findById(input.truck).select('truckNumber assignedDriver odometerKm');
+    if (!truck) throw ApiError.badRequest('The selected truck could not be found');
+    if (String(truck.assignedDriver) !== String(ctx.user._id)) {
+      throw ApiError.forbidden('You can only record fuel for the truck assigned to you');
+    }
+  } else {
+    truck = await requireTruckAccess(input.truck, ctx.user);
   }
   if (input.trip) {
     const trip = await assertTripAccessible(input.trip, ctx);
@@ -118,10 +127,21 @@ export async function updateFuelRecord(id: string, input: z.infer<typeof updateF
 
   const targetTruckId = input.truck ?? String(record.truck);
   const targetTripId = input.trip === undefined ? (record.trip ? String(record.trip) : null) : input.trip;
-  const targetTruck = await Truck.findById(targetTruckId).select('assignedDriver');
+  // Both the record's current truck and the one it is being moved to must be
+  // reachable, or a record could be walked out of this manager's fleet.
+  if (ctx.user.role !== 'DRIVER') {
+    await requireTruckAccess(String(record.truck), ctx.user);
+  }
+  const targetTruck =
+    ctx.user.role === 'DRIVER'
+      ? await Truck.findById(targetTruckId).select('assignedDriver')
+      : await requireTruckAccess(targetTruckId, ctx.user);
   if (!targetTruck) throw ApiError.badRequest('The selected truck could not be found');
   if (targetTripId) {
-    const targetTrip = await Trip.findById(targetTripId).select('truck status tripCode');
+    const targetTrip =
+      ctx.user.role === 'DRIVER'
+        ? await Trip.findById(targetTripId).select('truck status tripCode')
+        : await requireTripAccess(targetTripId, ctx.user);
     if (!targetTrip) throw ApiError.badRequest('The selected trip could not be found');
     if (String(targetTrip.truck) !== String(targetTruck._id)) {
       throw ApiError.validation('The selected trip does not use this truck');
@@ -171,6 +191,7 @@ export async function updateFuelRecord(id: string, input: z.infer<typeof updateF
 export async function deleteFuelRecord(id: string, ctx: Ctx) {
   const record = await FuelRecord.findById(id);
   if (!record) throw ApiError.notFound('That fuel record could not be found');
+  if (ctx.user.role !== 'DRIVER') await requireTruckAccess(String(record.truck), ctx.user);
 
   const tripId = record.trip ? String(record.trip) : null;
   await FuelRecord.deleteOne({ _id: record._id });

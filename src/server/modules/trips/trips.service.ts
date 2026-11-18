@@ -23,7 +23,8 @@ import {
   type ListQuery,
 } from '../../lib/pagination';
 import { recordAudit } from '../../services/audit.service';
-import { notify, usersWithRoles } from '../../services/notification.service';
+import { notify } from '../../services/notification.service';
+import { recipientsForTruck } from '../../services/ownership.service';
 import { TRIP_TRANSITIONS, type TripStatus } from '../../types/enums';
 import { advanceTruckOdometer } from '../../services/odometer.service';
 import {
@@ -451,7 +452,7 @@ export async function startTrip(id: string, body: { note?: string; odometerKm: n
   });
 
   await notify({
-    users: await usersWithRoles('ADMIN', 'MANAGER'),
+    users: await recipientsForTruck(trip.truck ?? null),
     type: 'TRIP_STARTED',
     title: `Trip ${trip.tripCode} started`,
     message: `${actor.name} started the trip from ${trip.pickupLocation} to ${trip.deliveryLocation}.`,
@@ -528,7 +529,7 @@ export async function completeTrip(
   });
 
   await notify({
-    users: [trip.driver, ...(await usersWithRoles('ADMIN', 'MANAGER'))],
+    users: [trip.driver, ...(await recipientsForTruck(trip.truck ?? null))],
     type: 'TRIP_COMPLETED',
     title: `Trip ${trip.tripCode} completed`,
     message: `The trip from ${trip.pickupLocation} to ${trip.deliveryLocation} has been completed.`,

@@ -6,6 +6,7 @@ import {
   pickGranularity,
   rangeQuerySchema,
   resolveRange,
+  reportScopeFor,
   timeSeries,
 } from '@/server/services/reports.service';
 
@@ -21,10 +22,12 @@ export async function GET(request: NextRequest) {
 
     // A driver's analytics are limited to their own activity.
     const driverId = ctx.user.role === 'DRIVER' ? String(ctx.user._id) : undefined;
+    // A manager's analytics cover their own fleet, not the company's.
+    const scope = await reportScopeFor(ctx.user);
 
     const [series, totals] = await Promise.all([
-      timeSeries(range, granularity, driverId),
-      financialsFor(range, driverId),
+      timeSeries(range, granularity, driverId, scope),
+      financialsFor(range, driverId, scope),
     ]);
 
     return ok({ range, granularity, series, totals });

@@ -9,6 +9,8 @@ import { DriverExpense } from '../models/DriverExpense';
 import { TransportationCost } from '../models/TransportationCost';
 import { DocumentRecord } from '../models/DocumentRecord';
 import { BreakdownReport } from '../models/BreakdownReport';
+import { accessibleTruckIds } from './ownership.service';
+import { ownerScopeFor } from '../lib/ownership';
 
 export type Granularity = 'day' | 'week' | 'month';
 
@@ -121,20 +123,20 @@ async function sumOf(
 }
 
 /** Revenue + the four expense buckets for a window, taken from their source collections. */
-export async function financialsFor(range: DateRange, driverId?: string) {
+export async function financialsFor(range: DateRange, driverId?: string, scope: ReportScope = UNSCOPED) {
   const driverTripMatch = driverId ? { driver: new Types.ObjectId(driverId) } : {};
 
   const [revenue, fuel, maintenance, estimatedMaintenance, driverExpenses, transportation] = await Promise.all([
-    sumOf(Trip, 'revenue', 'completedAt', range, { status: 'COMPLETED', ...driverTripMatch }),
-    sumOf(FuelRecord, 'totalCost', 'date', range, driverId ? { driver: new Types.ObjectId(driverId) } : {}),
+    sumOf(Trip, 'revenue', 'completedAt', range, { ...scope.tripScope, status: 'COMPLETED', ...driverTripMatch }),
+    sumOf(FuelRecord, 'totalCost', 'date', range, driverId ? { driver: new Types.ObjectId(driverId) } : scope.truckScope),
     // Maintenance is a fleet-level cost, so it is excluded from a driver's own view.
-    driverId ? Promise.resolve(0) : sumOf(Maintenance, 'cost', 'date', range, { status: 'COMPLETED' }),
-    driverId ? Promise.resolve(0) : sumOf(Maintenance, 'estimatedCost', 'date', range, { status: { $in: ['SCHEDULED', 'IN_PROGRESS'] } }),
+    driverId ? Promise.resolve(0) : sumOf(Maintenance, 'cost', 'date', range, { ...scope.truckScope, status: 'COMPLETED' }),
+    driverId ? Promise.resolve(0) : sumOf(Maintenance, 'estimatedCost', 'date', range, { ...scope.truckScope, status: { $in: ['SCHEDULED', 'IN_PROGRESS'] } }),
     sumOf(DriverExpense, 'amount', 'date', range, {
       status: 'APPROVED',
-      ...(driverId ? { driver: new Types.ObjectId(driverId) } : {}),
+      ...(driverId ? { driver: new Types.ObjectId(driverId) } : scope.truckScope),
     }),
-    driverId ? Promise.resolve(0) : sumOf(TransportationCost, 'amount', 'date', range),
+    driverId ? Promise.resolve(0) : sumOf(TransportationCost, 'amount', 'date', range, scope.byTrip),
   ]);
 
   const totalExpenses = round(fuel + maintenance + driverExpenses + transportation);
@@ -153,27 +155,42 @@ export async function financialsFor(range: DateRange, driverId?: string) {
 }
 
 /** Fetch current and previous period totals in one indexed scan per collection. */
+/**
+ * `scope` restricts every collection to one manager's fleet. Each collection
+ * reaches ownership by a different route — a trip is owned directly, fuel and
+ * maintenance through their truck, costs and expenses through their trip — so
+ * the caller resolves all three once and passes them in together.
+ */
+export interface ReportScope {
+  tripScope: Record<string, unknown>;
+  truckScope: Record<string, unknown>;
+  byTrip: Record<string, unknown>;
+}
+
+const UNSCOPED: ReportScope = { tripScope: {}, truckScope: {}, byTrip: {} };
+
 export async function financialsForPeriods(
   range: DateRange,
   previous = previousRange(range),
   granularity?: Granularity,
+  scope: ReportScope = UNSCOPED,
 ) {
   const seriesOptions = granularity ? { granularity, countTrips: true } : undefined;
   const [revenue, fuel, maintenance, driverExpenses, transportation] = await Promise.all([
-    periodTotals(Trip, 'completedAt', 'revenue', range, previous, { status: 'COMPLETED' }, {}, {}, seriesOptions),
-    periodTotals(FuelRecord, 'date', 'totalCost', range, previous, {}, {}, {}, seriesOptions),
-    periodTotals(Maintenance, 'date', 'cost', range, previous, {}, {
+    periodTotals(Trip, 'completedAt', 'revenue', range, previous, { ...scope.tripScope, status: 'COMPLETED' }, {}, {}, seriesOptions),
+    periodTotals(FuelRecord, 'date', 'totalCost', range, previous, scope.truckScope, {}, {}, seriesOptions),
+    periodTotals(Maintenance, 'date', 'cost', range, previous, scope.truckScope, {
       estimatedCurrent: [
-        { $match: { date: { $gte: range.from, $lte: range.to }, status: { $in: ['SCHEDULED', 'IN_PROGRESS'] } } },
+        { $match: { ...scope.truckScope, date: { $gte: range.from, $lte: range.to }, status: { $in: ['SCHEDULED', 'IN_PROGRESS'] } } },
         { $group: { _id: null, total: { $sum: '$estimatedCost' } } },
       ],
       estimatedPrevious: [
-        { $match: { date: { $gte: previous.from, $lte: previous.to }, status: { $in: ['SCHEDULED', 'IN_PROGRESS'] } } },
+        { $match: { ...scope.truckScope, date: { $gte: previous.from, $lte: previous.to }, status: { $in: ['SCHEDULED', 'IN_PROGRESS'] } } },
         { $group: { _id: null, total: { $sum: '$estimatedCost' } } },
       ],
     }, { status: 'COMPLETED' }, seriesOptions),
-    periodTotals(DriverExpense, 'date', 'amount', range, previous, { status: 'APPROVED' }, {}, {}, seriesOptions),
-    periodTotals(TransportationCost, 'date', 'amount', range, previous, {}, {}, {}, seriesOptions),
+    periodTotals(DriverExpense, 'date', 'amount', range, previous, { ...scope.truckScope, status: 'APPROVED' }, {}, {}, seriesOptions),
+    periodTotals(TransportationCost, 'date', 'amount', range, previous, scope.byTrip, {}, {}, seriesOptions),
   ]);
 
   const currentValues = {
@@ -352,6 +369,19 @@ function financialSummary(
 export async function buildDashboard(user: UserDocument, range: DateRange) {
   if (user.role === 'DRIVER') return buildDriverDashboard(user, range);
 
+  // Everything below is fleet-wide unless it is scoped. For a manager that
+  // would report the whole company's revenue, pending spend and breakdowns as
+  // if it were theirs, so each aggregate gets the same pair of predicates:
+  // their trucks, and — for anything that counts money — only the trips they
+  // actually earned, leaving out those inherited from a previous owner.
+  const truckIds = await accessibleTruckIds(user);
+  const truckScope = truckIds === null ? {} : { truck: { $in: truckIds } };
+  const ownScope = truckIds === null ? {} : { ...ownerScopeFor(user), inheritedFrom: null };
+  const tripIds =
+    truckIds === null ? null : (await Trip.find(ownScope).select('_id').lean()).map((t) => t._id);
+  const tripScope = tripIds === null ? {} : { _id: { $in: tripIds } };
+  const byTrip = tripIds === null ? {} : { trip: { $in: tripIds } };
+
   const previous = previousRange(range);
 
   const [
@@ -367,29 +397,37 @@ export async function buildDashboard(user: UserDocument, range: DateRange) {
     expiringDocuments,
     recentTrips,
   ] = await Promise.all([
-    Truck.aggregate<{ _id: string; count: number }>([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
-    User.aggregate<{ _id: string; count: number }>([
-      { $match: { role: 'DRIVER' } },
+    Truck.aggregate<{ _id: string; count: number }>([
+      { $match: truckIds === null ? {} : { _id: { $in: truckIds } } },
       { $group: { _id: '$status', count: { $sum: 1 } } },
     ]),
-    Trip.aggregate<{ _id: string; count: number }>([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
+    User.aggregate<{ _id: string; count: number }>([
+      { $match: { role: 'DRIVER', ...(truckIds === null ? {} : { manager: user._id }) } },
+      { $group: { _id: '$status', count: { $sum: 1 } } },
+    ]),
+    Trip.aggregate<{ _id: string; count: number }>([
+      { $match: tripScope },
+      { $group: { _id: '$status', count: { $sum: 1 } } },
+    ]),
     Trip.countDocuments({
+      ...tripScope,
       status: { $in: ['PLANNED', 'ASSIGNED', 'LOADING'] },
       startDate: { $lt: resolveRange('today').from },
     }),
-    Trip.countDocuments({ startDate: { $gte: range.from, $lte: range.to } }),
-    Trip.countDocuments({ startDate: { $gte: previous.from, $lte: previous.to } }),
-    financialsForPeriods(range, previous, pickGranularity(range)),
+    Trip.countDocuments({ ...tripScope, startDate: { $gte: range.from, $lte: range.to } }),
+    Trip.countDocuments({ ...tripScope, startDate: { $gte: previous.from, $lte: previous.to } }),
+    financialsForPeriods(range, previous, pickGranularity(range), { tripScope, truckScope, byTrip }),
     DriverExpense.aggregate<{ count: number; amount: number }>([
-      { $match: { status: 'PENDING' } },
+      { $match: { ...truckScope, status: 'PENDING' } },
       { $group: { _id: null, count: { $sum: 1 }, amount: { $sum: '$amount' } } },
     ]),
-    BreakdownReport.countDocuments({ status: { $nin: ['RESOLVED', 'CANCELLED'] } }),
+    BreakdownReport.countDocuments({ ...truckScope, status: { $nin: ['RESOLVED', 'CANCELLED'] } }),
     DocumentRecord.countDocuments({
+      ...truckScope,
       expiryDate: { $ne: null, $lte: new Date(Date.now() + 30 * 86_400_000) },
       status: { $ne: 'REJECTED' },
     }),
-    Trip.find({})
+    Trip.find(tripScope)
       .sort({ createdAt: -1 })
       .limit(6)
       .populate('truck', 'truckNumber')
@@ -495,7 +533,7 @@ async function buildDriverDashboard(user: UserDocument, range: DateRange) {
  * One bucketed series holding revenue, every expense bucket, profit and trip
  * counts — everything the analytics charts need in a single round trip.
  */
-export async function timeSeries(range: DateRange, granularity: Granularity, driverId?: string) {
+export async function timeSeries(range: DateRange, granularity: Granularity, driverId?: string, scope: ReportScope = UNSCOPED) {
   const unit = granularity;
   const driverMatch = driverId ? { driver: new Types.ObjectId(driverId) } : {};
 
@@ -507,6 +545,7 @@ export async function timeSeries(range: DateRange, granularity: Granularity, dri
     Trip.aggregate<{ _id: Date; revenue: number; trips: number }>([
       {
         $match: {
+          ...scope.tripScope,
           completedAt: { $gte: range.from, $lte: range.to },
           status: 'COMPLETED',
           ...driverMatch,
@@ -515,23 +554,23 @@ export async function timeSeries(range: DateRange, granularity: Granularity, dri
       { $group: { _id: bucket('completedAt'), revenue: { $sum: '$revenue' }, trips: { $sum: 1 } } },
     ]),
     FuelRecord.aggregate<{ _id: Date; total: number }>([
-      { $match: { date: { $gte: range.from, $lte: range.to }, ...driverMatch } },
+      { $match: { ...scope.truckScope, date: { $gte: range.from, $lte: range.to }, ...driverMatch } },
       { $group: { _id: bucket('date'), total: { $sum: '$totalCost' } } },
     ]),
     driverId
       ? Promise.resolve([] as { _id: Date; total: number }[])
       : Maintenance.aggregate<{ _id: Date; total: number }>([
-          { $match: { date: { $gte: range.from, $lte: range.to }, status: 'COMPLETED' } },
+          { $match: { ...scope.truckScope, date: { $gte: range.from, $lte: range.to }, status: 'COMPLETED' } },
           { $group: { _id: bucket('date'), total: { $sum: '$cost' } } },
         ]),
     DriverExpense.aggregate<{ _id: Date; total: number }>([
-      { $match: { date: { $gte: range.from, $lte: range.to }, status: 'APPROVED', ...driverMatch } },
+      { $match: { ...scope.truckScope, date: { $gte: range.from, $lte: range.to }, status: 'APPROVED', ...driverMatch } },
       { $group: { _id: bucket('date'), total: { $sum: '$amount' } } },
     ]),
     driverId
       ? Promise.resolve([] as { _id: Date; total: number }[])
       : TransportationCost.aggregate<{ _id: Date; total: number }>([
-          { $match: { date: { $gte: range.from, $lte: range.to } } },
+          { $match: { ...scope.byTrip, date: { $gte: range.from, $lte: range.to } } },
           { $group: { _id: bucket('date'), total: { $sum: '$amount' } } },
         ]),
   ]);
@@ -572,8 +611,24 @@ export async function timeSeries(range: DateRange, granularity: Granularity, dri
 }
 
 /** Leaderboards shown on the reports page. */
-export async function buildLeaderboards(range: DateRange) {
-  const match = { completedAt: { $gte: range.from, $lte: range.to }, status: 'COMPLETED' };
+/**
+ * Resolves one user's report scope once, so every aggregate in a request shares
+ * it. An administrator gets the unrestricted scope.
+ */
+export async function reportScopeFor(user: UserDocument): Promise<ReportScope> {
+  const truckIds = await accessibleTruckIds(user);
+  if (truckIds === null) return UNSCOPED;
+  const ownScope = { ...ownerScopeFor(user), inheritedFrom: null };
+  const tripIds = (await Trip.find(ownScope).select('_id').lean()).map((trip) => trip._id);
+  return {
+    tripScope: { _id: { $in: tripIds } },
+    truckScope: { truck: { $in: truckIds } },
+    byTrip: { trip: { $in: tripIds } },
+  };
+}
+
+export async function buildLeaderboards(range: DateRange, scope: ReportScope = UNSCOPED) {
+  const match = { ...scope.tripScope, completedAt: { $gte: range.from, $lte: range.to }, status: 'COMPLETED' };
 
   const [topDrivers, topTrucks, topRoutes, expensesByType] = await Promise.all([
     Trip.aggregate([
@@ -634,7 +689,7 @@ export async function buildLeaderboards(range: DateRange) {
       },
     ]),
     DriverExpense.aggregate([
-      { $match: { date: { $gte: range.from, $lte: range.to }, status: 'APPROVED' } },
+      { $match: { ...scope.truckScope, date: { $gte: range.from, $lte: range.to }, status: 'APPROVED' } },
       { $group: { _id: '$type', amount: { $sum: '$amount' }, count: { $sum: 1 } } },
       { $sort: { amount: -1 } },
       { $project: { _id: 0, type: '$_id', amount: 1, count: 1 } },

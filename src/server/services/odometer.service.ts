@@ -6,6 +6,7 @@ import { FuelRecord } from '../models/FuelRecord';
 import { Maintenance } from '../models/Maintenance';
 import type { Ctx } from '../api/context';
 import { recordAudit } from './audit.service';
+import { requireTripAccess, requireTruckAccess } from './ownership.service';
 
 export const odometerCorrectionSchema = z.object({
   source: z.enum(['TRUCK', 'TRIP_START', 'TRIP_CLOSE', 'FUEL', 'MAINTENANCE']),
@@ -39,14 +40,14 @@ export async function correctOdometer(
   let entityId = input.recordId;
 
   if (input.source === 'TRUCK') {
-    const truck = await Truck.findById(input.recordId).select('truckNumber odometerKm');
-    if (!truck) throw ApiError.notFound('The truck could not be found');
+    // An odometer reading decides mileage, service intervals and resale value,
+    // so correcting one is a real change to someone's asset.
+    const truck = await requireTruckAccess(input.recordId, ctx.user);
     previousKm = truck.odometerKm;
     truckId = String(truck._id);
     entity = `Truck ${truck.truckNumber} current reading`;
   } else if (input.source === 'TRIP_START' || input.source === 'TRIP_CLOSE') {
-    const trip = await Trip.findById(input.recordId);
-    if (!trip) throw ApiError.notFound('The trip could not be found');
+    const trip = await requireTripAccess(input.recordId, ctx.user);
     const reading = trip.odometerReadings.find((item) => item.event === event);
     if (!reading) throw ApiError.notFound('That trip odometer reading has not been recorded');
     previousKm = reading.valueKm;
@@ -68,6 +69,7 @@ export async function correctOdometer(
   } else if (input.source === 'FUEL') {
     const record = await FuelRecord.findById(input.recordId);
     if (!record) throw ApiError.notFound('The fuel record could not be found');
+    await requireTruckAccess(String(record.truck), ctx.user);
     if (record.odometerKm == null) throw ApiError.notFound('That fuel record has no odometer reading');
     previousKm = record.odometerKm;
     record.odometerKm = input.readingKm;
@@ -77,6 +79,7 @@ export async function correctOdometer(
   } else {
     const record = await Maintenance.findById(input.recordId);
     if (!record) throw ApiError.notFound('The maintenance record could not be found');
+    await requireTruckAccess(String(record.truck), ctx.user);
     if (record.odometerKm == null) throw ApiError.notFound('That maintenance record has no odometer reading');
     previousKm = record.odometerKm;
     record.odometerKm = input.readingKm;

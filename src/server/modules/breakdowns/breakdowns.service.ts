@@ -14,10 +14,11 @@ import {
   searchFilter,
 } from '../../lib/pagination';
 import { recordAudit } from '../../services/audit.service';
-import { notify, toId, usersWithRoles } from '../../services/notification.service';
+import { notify, toId } from '../../services/notification.service';
 import { BREAKDOWN_SEVERITIES, BREAKDOWN_STATUSES } from '../../types/enums';
 import { dateString, objectId } from '../shared';
 import type { Ctx } from '../../api/context';
+import { recipientsForTruck, requireTruckAccess, truckScopeFilter } from '../../services/ownership.service';
 
 export const createBreakdownSchema = z.object({
   truck: objectId,
@@ -52,6 +53,8 @@ export async function listBreakdowns(query: z.infer<typeof listBreakdownsQuerySc
 
   const filter = mergeFilters(
     ctx.user.role === 'DRIVER' ? { driver: ctx.user._id } : query.driver ? { driver: query.driver } : null,
+    // A breakdown belongs to the truck it happened to.
+    ctx.user.role === 'DRIVER' ? null : await truckScopeFilter(ctx.user),
     query.status ? { status: query.status } : null,
     query.severity ? { severity: query.severity } : null,
     query.truck ? { truck: query.truck } : null,
@@ -79,11 +82,18 @@ export async function getBreakdown(id: string, ctx: Ctx) {
 }
 
 export async function createBreakdown(input: z.infer<typeof createBreakdownSchema>, ctx: Ctx) {
-  const truck = await Truck.findById(input.truck).select('truckNumber assignedDriver status');
-  if (!truck) throw ApiError.badRequest('The selected truck could not be found');
-
-  if (ctx.user.role === 'DRIVER' && String(truck.assignedDriver) !== String(ctx.user._id)) {
-    throw ApiError.forbidden('You can only report breakdowns for the truck assigned to you');
+  // A high-severity report sets the truck to MAINTENANCE, so reporting one is
+  // enough to ground a vehicle. A driver may only do that for their own truck;
+  // a manager, only for a truck they hold.
+  let truck;
+  if (ctx.user.role === 'DRIVER') {
+    truck = await Truck.findById(input.truck).select('truckNumber assignedDriver status owner sharedWith');
+    if (!truck) throw ApiError.badRequest('The selected truck could not be found');
+    if (String(truck.assignedDriver) !== String(ctx.user._id)) {
+      throw ApiError.forbidden('You can only report breakdowns for the truck assigned to you');
+    }
+  } else {
+    truck = await requireTruckAccess(input.truck, ctx.user);
   }
 
   // Attach the report to whatever trip the truck is currently running.
@@ -133,7 +143,9 @@ export async function createBreakdown(input: z.infer<typeof createBreakdownSchem
   });
 
   await notify({
-    users: await usersWithRoles('ADMIN', 'MANAGER'),
+    // The administrators plus the manager who holds this truck — not every
+    // manager in the company, who can do nothing about it anyway.
+    users: await recipientsForTruck(truck._id),
     type: 'BREAKDOWN_REPORTED',
     title: `${report.severity} breakdown — ${truck.truckNumber}`,
     message: `${ctx.user.name} reported a breakdown at ${report.location}: ${report.description.slice(0, 120)}`,
@@ -152,6 +164,8 @@ export async function updateBreakdownStatus(
 ) {
   const report = await BreakdownReport.findById(id);
   if (!report) throw ApiError.notFound('That breakdown report could not be found');
+  // Resolving a breakdown puts the truck back on the road.
+  await requireTruckAccess(String(report.truck), ctx.user);
 
   const allowed: Record<string, string[]> = {
     REPORTED: ['ACKNOWLEDGED', 'IN_PROGRESS', 'RESOLVED', 'CANCELLED'],

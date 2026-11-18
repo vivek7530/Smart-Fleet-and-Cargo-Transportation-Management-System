@@ -14,8 +14,8 @@ export const dynamic = 'force-dynamic';
 // Transportation costs are a back-office ledger — never exposed to drivers.
 export async function GET(request: NextRequest) {
   return handle(async () => {
-    await requireStaff(request);
-    return ok(await listTransportationCosts(parseQuery(request, listCostsQuerySchema)));
+    const ctx = await requireStaff(request);
+    return ok(await listTransportationCosts(parseQuery(request, listCostsQuerySchema), ctx.user));
   });
 }
 

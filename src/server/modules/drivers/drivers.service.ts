@@ -5,6 +5,7 @@ import { Truck } from '../../models/Truck';
 import { Trip } from '../../models/Trip';
 import { ApiError } from '../../lib/ApiError';
 import { listQuerySchema, mergeFilters, paginate, resolveSort, searchFilter } from '../../lib/pagination';
+import { isAdmin, redactTripFor, refId, type ActorLike } from '../../lib/ownership';
 
 /**
  * Drivers are simply users with the DRIVER role — the data is never duplicated.
@@ -13,9 +14,25 @@ import { listQuerySchema, mergeFilters, paginate, resolveSort, searchFilter } fr
 export const listDriversQuerySchema = listQuerySchema.extend({
   status: z.enum(['INVITED', 'ACTIVE', 'SUSPENDED']).optional(),
   availability: z.enum(['ON_TRIP', 'AVAILABLE']).optional(),
+  /** Administrative views; ignored for a manager, whose own scope decides. */
+  manager: z.string().regex(/^[a-f\d]{24}$/i).optional(),
+  unassigned: z.coerce.boolean().optional(),
 });
 
-export async function listDrivers(query: z.infer<typeof listDriversQuerySchema>) {
+/**
+ * Which drivers this user may see.
+ *
+ * A manager sees the drivers who work under them. A driver with no manager is
+ * deliberately NOT in that pool: an unassigned driver is a red flag for the
+ * administrator to resolve, and letting any manager pick one up would be the
+ * silent self-assignment the whole design is built to avoid.
+ */
+function driverScopeFor(user: ActorLike): Record<string, unknown> {
+  if (isAdmin(user)) return { role: 'DRIVER' };
+  return { role: 'DRIVER', manager: user._id };
+}
+
+export async function listDrivers(query: z.infer<typeof listDriversQuerySchema>, user: ActorLike) {
   const { sortBy, sortDir } = resolveSort(query, ['createdAt', 'name', 'status', 'experienceYears']);
 
   let availabilityFilter: Record<string, unknown> | null = null;
@@ -27,8 +44,10 @@ export async function listDrivers(query: z.infer<typeof listDriversQuerySchema>)
   }
 
   const filter = mergeFilters(
-    { role: 'DRIVER' },
+    driverScopeFor(user),
     query.status ? { status: query.status } : null,
+    isAdmin(user) && query.manager ? { manager: query.manager } : null,
+    isAdmin(user) && query.unassigned ? { manager: null } : null,
     availabilityFilter,
     searchFilter(query.search, ['name', 'email', 'mobile', 'licenseNumber']),
   );
@@ -82,9 +101,15 @@ export async function listDrivers(query: z.infer<typeof listDriversQuerySchema>)
   };
 }
 
-export async function getDriver(id: string) {
+export async function getDriver(id: string, user: ActorLike) {
   const driver = await User.findOne({ _id: id, role: 'DRIVER' });
   if (!driver) throw ApiError.notFound('That driver could not be found');
+  // Same message either way: a driver who works for someone else must be
+  // indistinguishable from one who does not exist. Their recent trips are
+  // attached below, so this is the difference between a name and a work history.
+  if (!isAdmin(user) && refId(driver.manager) !== refId(user._id)) {
+    throw ApiError.notFound('That driver could not be found');
+  }
 
   const [assignedTruck, trips] = await Promise.all([
     Truck.findOne({ assignedDriver: driver._id }),
@@ -94,6 +119,8 @@ export async function getDriver(id: string) {
   return {
     driver: driver.toJSON(),
     assignedTruck: assignedTruck?.toJSON() ?? null,
-    recentTrips: trips.map((trip) => trip.toJSON()),
+    // A driver's history can span managers if they were transferred, so each
+    // trip answers for itself rather than inheriting the driver's answer.
+    recentTrips: trips.map((trip) => redactTripFor(trip.toJSON(), trip, user)),
   };
 }

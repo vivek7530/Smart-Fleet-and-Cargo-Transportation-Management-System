@@ -18,6 +18,7 @@ import { MAINTENANCE_STATUSES, MAINTENANCE_TYPES } from '../../types/enums';
 import { dateString, objectId, optionalDateString } from '../shared';
 import type { Ctx } from '../../api/context';
 import { advanceTruckOdometer } from '../../services/odometer.service';
+import { requireTruckAccess, truckScopeFilter } from '../../services/ownership.service';
 
 export const createMaintenanceSchema = z.object({
   truck: objectId,
@@ -57,6 +58,9 @@ export async function listMaintenance(query: z.infer<typeof listMaintenanceQuery
   if (ctx.user.role === 'DRIVER') {
     const truck = await Truck.findOne({ assignedDriver: ctx.user._id }).select('_id');
     scope = { truck: truck?._id ?? null };
+  } else {
+    // Maintenance has no owner of its own, so it borrows the truck's.
+    scope = await truckScopeFilter(ctx.user);
   }
 
   const filter = mergeFilters(
@@ -79,8 +83,9 @@ export async function listMaintenance(query: z.infer<typeof listMaintenanceQuery
 }
 
 export async function createMaintenance(input: z.infer<typeof createMaintenanceSchema>, ctx: Ctx) {
-  const truck = await Truck.findById(input.truck);
-  if (!truck) throw ApiError.badRequest('The selected truck could not be found');
+  // Booking maintenance puts a truck into MAINTENANCE status, which takes it
+  // off the road. Unguarded, one manager could ground another's vehicle.
+  const truck = await requireTruckAccess(input.truck, ctx.user);
 
   if (input.status === 'IN_PROGRESS') {
     const activeTrip = await Trip.exists({
@@ -169,6 +174,10 @@ export async function createMaintenance(input: z.infer<typeof createMaintenanceS
 export async function updateMaintenance(id: string, input: z.infer<typeof updateMaintenanceSchema>, ctx: Ctx) {
   const record = await Maintenance.findById(id);
   if (!record) throw ApiError.notFound('That maintenance record could not be found');
+  await requireTruckAccess(String(record.truck), ctx.user);
+  if (input.truck && String(input.truck) !== String(record.truck)) {
+    await requireTruckAccess(String(input.truck), ctx.user);
+  }
 
   if (input.odometerKm !== undefined && record.odometerKm !== undefined && input.odometerKm !== record.odometerKm) {
     throw ApiError.conflict('Submitted maintenance odometer readings cannot be edited; use the authorized correction workflow');
@@ -231,6 +240,7 @@ export async function updateMaintenance(id: string, input: z.infer<typeof update
 export async function deleteMaintenance(id: string, ctx: Ctx) {
   const record = await Maintenance.findById(id);
   if (!record) throw ApiError.notFound('That maintenance record could not be found');
+  await requireTruckAccess(String(record.truck), ctx.user);
   if (record.status === 'COMPLETED') {
     throw ApiError.conflict('Completed maintenance is a historical record and cannot be deleted');
   }

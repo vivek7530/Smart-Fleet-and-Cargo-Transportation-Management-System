@@ -1,4 +1,6 @@
 import type { Ctx } from '../../api/context';
+import { requireTripAccess, tripScopeFilter } from '../../services/ownership.service';
+import { isAdmin, type ActorLike } from '../../lib/ownership';
 import { Cargo } from '../../models/Cargo';
 import { Trip } from '../../models/Trip';
 import { nextCode } from '../../models/Counter';
@@ -26,10 +28,14 @@ const SORT_FIELDS = ['createdAt', 'cargoCode', 'weightTons', 'status', 'declared
 
 type CargoListQuery = ListQuery & { status?: string; type?: string; trip?: string; unassigned?: boolean };
 
-export async function listCargo(query: CargoListQuery) {
+export async function listCargo(query: CargoListQuery, user: ActorLike) {
   const { sortBy, sortDir } = resolveSort(query, SORT_FIELDS);
 
   const filter = mergeFilters(
+    // Cargo has no owner of its own; it belongs to the trip carrying it.
+    // Unassigned cargo is a shared pool so any manager can pick it up, which is
+    // how a consignment reaches a truck in the first place.
+    isAdmin(user) ? null : { $or: [{ trip: null }, (await tripScopeFilter(user)) ?? {}] },
     query.status ? { status: query.status } : null,
     query.type ? { type: query.type } : null,
     query.trip ? { trip: query.trip } : null,
@@ -48,9 +54,15 @@ export async function listCargo(query: CargoListQuery) {
   });
 }
 
-export async function getCargo(id: string) {
+export async function getCargo(id: string, user: ActorLike) {
   const cargo = await Cargo.findById(id).populate('trip', 'tripCode status pickupLocation deliveryLocation');
   if (!cargo) throw ApiError.notFound('That cargo record could not be found');
+  // Cargo not yet on a trip is visible to everyone; once it is on a trip it
+  // belongs to that trip's manager.
+  if (cargo.trip) {
+    const tripId = (cargo.trip as unknown as { _id?: unknown })._id ?? cargo.trip;
+    await requireTripAccess(String(tripId), user, 'VIEW');
+  }
   return cargo;
 }
 
@@ -58,7 +70,7 @@ export async function createCargo(input: CreateCargoInput, ctx: Ctx) {
   const actor = ctx.user;
   const cargoCode = await nextCode('CRG');
 
-  if (input.trip) await assertTripOpen(input.trip);
+  if (input.trip) await assertTripOpen(input.trip, ctx.user);
 
   const cargo = await Cargo.create({
     ...input,
@@ -91,7 +103,8 @@ export async function updateCargo(id: string, input: UpdateCargoInput, ctx: Ctx)
     if (['LOADED', 'IN_TRANSIT', 'DELIVERED'].includes(cargo.status)) {
       throw ApiError.conflict('Cargo cannot be reassigned after it has been loaded onto a trip');
     }
-    if (input.trip) await assertTripOpen(input.trip);
+    if (previousTrip) await requireTripAccess(previousTrip, ctx.user);
+    if (input.trip) await assertTripOpen(input.trip, ctx.user);
     // Keep both sides of the cargo â†” trip link in step.
     if (previousTrip) await Trip.updateOne({ _id: previousTrip }, { $pull: { cargo: cargo._id } });
     if (input.trip) await Trip.updateOne({ _id: input.trip }, { $addToSet: { cargo: cargo._id } });
@@ -120,6 +133,8 @@ export async function deleteCargo(id: string, ctx: Ctx) {
   const actor = ctx.user;
   const cargo = await Cargo.findById(id);
   if (!cargo) throw ApiError.notFound('That cargo record could not be found');
+  // Deleting cargo pulls it off whatever trip is carrying it.
+  if (cargo.trip) await requireTripAccess(String(cargo.trip), ctx.user);
 
   if (cargo.trip && ['LOADED', 'IN_TRANSIT', 'DELIVERED'].includes(cargo.status)) {
     throw ApiError.conflict('Cargo that is already on the road cannot be deleted');
@@ -139,9 +154,10 @@ export async function deleteCargo(id: string, ctx: Ctx) {
   return { id };
 }
 
-async function assertTripOpen(tripId: string) {
-  const trip = await Trip.findById(tripId).select('status tripCode');
-  if (!trip) throw ApiError.badRequest('The selected trip could not be found');
+async function assertTripOpen(tripId: string, user: ActorLike) {
+  // Ownership is checked here rather than at each caller, because every path
+  // that attaches cargo to a trip already comes through this function.
+  const trip = await requireTripAccess(tripId, user);
   if (['COMPLETED', 'CANCELLED'].includes(trip.status)) {
     throw ApiError.conflict(`Trip ${trip.tripCode} is already ${trip.status.toLowerCase()}`);
   }

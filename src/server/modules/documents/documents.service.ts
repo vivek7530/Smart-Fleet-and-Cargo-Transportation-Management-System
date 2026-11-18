@@ -17,6 +17,12 @@ import { notify } from '../../services/notification.service';
 import { DOCUMENT_OWNER_TYPES, DOCUMENT_STATUSES, DOCUMENT_TYPES } from '../../types/enums';
 import { objectId, optionalDateString } from '../shared';
 import type { Ctx } from '../../api/context';
+import {
+  accessibleTruckIds,
+  requireTripAccess,
+  requireTruckAccess,
+} from '../../services/ownership.service';
+import { isAdmin, type ActorLike } from '../../lib/ownership';
 
 /**
  * Documents are tracked as records only — reference number, issuer, validity
@@ -93,6 +99,22 @@ export async function listDocuments(query: z.infer<typeof listDocumentsQuerySche
     scope = {
       $or: [{ driver: ctx.user._id }, { addedBy: ctx.user._id }, ...(truck ? [{ truck: truck._id }] : [])],
     };
+  } else if (!isAdmin(ctx.user)) {
+    // A document hangs off a truck, a trip or a driver. A manager sees the ones
+    // on their own trucks, their own drivers, and whatever they filed themselves.
+    const truckIds = (await accessibleTruckIds(ctx.user)) ?? [];
+    const driverIds = (
+      await User.find({ role: 'DRIVER', manager: ctx.user._id }).select('_id').lean()
+    ).map((driver) => driver._id);
+    const tripIds = (await Trip.find({ truck: { $in: truckIds } }).select('_id').lean()).map((t) => t._id);
+    scope = {
+      $or: [
+        { truck: { $in: truckIds } },
+        { trip: { $in: tripIds } },
+        { driver: { $in: driverIds } },
+        { addedBy: ctx.user._id },
+      ],
+    };
   }
 
   const expiringFilter = query.expiring
@@ -123,10 +145,16 @@ export async function listDocuments(query: z.infer<typeof listDocumentsQuerySche
 }
 
 /** Powers the "documents expiring soon" widget. */
-export async function expiringDocuments(days = 30) {
+export async function expiringDocuments(days = 30, user?: ActorLike) {
   const horizon = new Date(Date.now() + Math.min(days, 365) * 86_400_000);
 
+  // Without a scope this warns every manager about every other manager's
+  // insurance renewals — and it drives a sidebar badge, so it is seen daily.
+  const scope =
+    user && !isAdmin(user) ? { truck: { $in: (await accessibleTruckIds(user)) ?? [] } } : {};
+
   const documents = await DocumentRecord.find({
+    ...scope,
     expiryDate: { $ne: null, $lte: horizon },
     status: { $ne: 'REJECTED' },
   })
@@ -146,10 +174,14 @@ export async function createDocument(input: z.infer<typeof createDocumentSchema>
   let tripDriverId: string | null = null;
 
   if (input.truck) {
-    const truck = await Truck.findById(input.truck).select('assignedDriver');
-    if (!truck) throw ApiError.badRequest('The selected truck could not be found');
-    if (isDriver && (input.ownerType !== 'TRUCK' || String(truck.assignedDriver) !== String(ctx.user._id))) {
-      throw ApiError.forbidden('You can only add documents for the truck assigned to you');
+    if (isDriver) {
+      const truck = await Truck.findById(input.truck).select('assignedDriver');
+      if (!truck) throw ApiError.badRequest('The selected truck could not be found');
+      if (input.ownerType !== 'TRUCK' || String(truck.assignedDriver) !== String(ctx.user._id)) {
+        throw ApiError.forbidden('You can only add documents for the truck assigned to you');
+      }
+    } else {
+      await requireTruckAccess(input.truck, ctx.user);
     }
   }
   if (input.driver) {
@@ -160,7 +192,9 @@ export async function createDocument(input: z.infer<typeof createDocumentSchema>
     }
   }
   if (input.trip) {
-    const trip = await Trip.findById(input.trip).select('driver');
+    const trip = isDriver
+      ? await Trip.findById(input.trip).select('driver')
+      : await requireTripAccess(input.trip, ctx.user);
     if (!trip) throw ApiError.badRequest('The selected trip could not be found');
     tripDriverId = trip.driver ? String(trip.driver) : null;
     if (input.ownerType === 'TRIP' && input.driver && String(input.driver) !== tripDriverId) {
@@ -244,6 +278,10 @@ export async function reviewDocument(
 ) {
   const record = await DocumentRecord.findById(id);
   if (!record) throw ApiError.notFound('That document could not be found');
+  if (!isAdmin(ctx.user)) {
+    if (record.truck) await requireTruckAccess(String(record.truck), ctx.user);
+    else if (record.trip) await requireTripAccess(String(record.trip), ctx.user);
+  }
 
   record.status = status;
   record.verifiedBy = ctx.user._id;

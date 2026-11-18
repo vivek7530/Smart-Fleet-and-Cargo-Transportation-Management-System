@@ -10,8 +10,8 @@ export const dynamic = 'force-dynamic';
 // Cargo is a back-office concern — drivers see it through their trip.
 export async function GET(request: NextRequest) {
   return handle(async () => {
-    await requireStaff(request);
-    return ok(await listCargo(parseQuery(request, listCargoQuerySchema)));
+    const ctx = await requireStaff(request);
+    return ok(await listCargo(parseQuery(request, listCargoQuerySchema), ctx.user));
   });
 }
 

@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   return handle(async () => {
-    await requireStaff(request);
-    return ok(await listDrivers(parseQuery(request, listDriversQuerySchema)));
+    const ctx = await requireStaff(request);
+    return ok(await listDrivers(parseQuery(request, listDriversQuerySchema), ctx.user));
   });
 }
