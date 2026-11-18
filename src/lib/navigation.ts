@@ -118,6 +118,13 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       { label: 'Users', href: '/users', icon: Users, roles: ['ADMIN'], description: 'Everyone in the system' },
       { label: 'Managers', href: '/managers', icon: Manager, roles: ['ADMIN'], description: 'Manager accounts and activity' },
+      {
+        label: 'Drivers',
+        href: '/driver-accounts',
+        icon: Steering,
+        roles: ['ADMIN'],
+        description: 'Driver accounts and invitations',
+      },
       { label: 'Audit Log', href: '/audit-logs', icon: Audit, roles: ['ADMIN'], description: 'Who did what, and when' },
     ],
   },
