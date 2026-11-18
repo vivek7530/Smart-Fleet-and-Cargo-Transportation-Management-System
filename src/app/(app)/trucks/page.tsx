@@ -10,6 +10,7 @@ import { formatDate, formatNumber, formatWeight } from '@/lib/format';
 import type { Truck } from '@/lib/types';
 import { useInfiniteList } from '@/hooks/use-infinite-list';
 import { useListState } from '@/hooks/use-list-state';
+import { useFleetFilters } from '@/hooks/use-fleet-filters';
 import { DataList, type Column } from '@/components/data/data-list';
 import { ListToolbar, PageHeader, optionsFrom } from '@/components/data/list-toolbar';
 import { RowActions } from '@/components/data/row-actions';
@@ -27,7 +28,17 @@ const FUEL_TYPES = ['DIESEL', 'PETROL', 'CNG', 'LNG', 'ELECTRIC'];
 export default function TrucksPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const list = useListState({ defaultSort: 'createdAt', filterKeys: ['status', 'fuelType'] });
+  const list = useListState({
+    defaultSort: 'createdAt',
+    filterKeys: ['status', 'fuelType', 'owner', 'assignedDriver'],
+  });
+
+  // The truck list calls its own fields owner and assignedDriver.
+  const fleetFilters = useFleetFilters(list, { include: ['manager', 'driver'] }).map((filter) =>
+    filter.key === 'manager'
+      ? { ...filter, key: 'owner', value: list.filters.owner ?? 'ALL', onChange: (v: string) => list.setFilter('owner', v) }
+      : { ...filter, key: 'assignedDriver', value: list.filters.assignedDriver ?? 'ALL', onChange: (v: string) => list.setFilter('assignedDriver', v) },
+  );
 
   const [formOpen, setFormOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<Truck | null>(null);
@@ -176,6 +187,7 @@ export default function TrucksPage() {
             options: optionsFrom(FUEL_TYPES, 'All fuel types'),
             onChange: (value) => list.setFilter('fuelType', value),
           },
+          ...fleetFilters,
         ]}
       />
 

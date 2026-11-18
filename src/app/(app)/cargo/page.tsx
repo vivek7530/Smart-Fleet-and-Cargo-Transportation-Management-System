@@ -13,6 +13,7 @@ import { humanise } from '@/lib/utils';
 import type { Cargo } from '@/lib/types';
 import { useInfiniteList } from '@/hooks/use-infinite-list';
 import { useListState } from '@/hooks/use-list-state';
+import { useFleetFilters } from '@/hooks/use-fleet-filters';
 import { DataList, type Column } from '@/components/data/data-list';
 import { ListToolbar, PageHeader, optionsFrom } from '@/components/data/list-toolbar';
 import { RowActions } from '@/components/data/row-actions';
@@ -39,7 +40,14 @@ const CARGO_STATUSES = ['PENDING', 'ASSIGNED', 'LOADED', 'IN_TRANSIT', 'DELIVERE
 
 export default function CargoPage() {
   const queryClient = useQueryClient();
-  const list = useListState({ defaultSort: 'createdAt', filterKeys: ['status', 'type', 'unassigned'] });
+  const list = useListState({
+    defaultSort: 'createdAt',
+    filterKeys: ['status', 'type', 'unassigned', 'manager', 'truck', 'driver'],
+  });
+
+  // Manager, truck and driver belong to the trip carrying a shipment; the
+  // server resolves them through it.
+  const fleetFilters = useFleetFilters(list);
 
   const [formOpen, setFormOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<Cargo | null>(null);
@@ -182,6 +190,7 @@ export default function CargoPage() {
             ],
             onChange: (value) => list.setFilter('unassigned', value),
           },
+          ...fleetFilters,
         ]}
       />
 

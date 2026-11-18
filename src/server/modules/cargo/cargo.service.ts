@@ -26,7 +26,38 @@ const SEARCH_FIELDS = [
 ];
 const SORT_FIELDS = ['createdAt', 'cargoCode', 'weightTons', 'status', 'declaredValue'];
 
-type CargoListQuery = ListQuery & { status?: string; type?: string; trip?: string; unassigned?: boolean };
+type CargoListQuery = ListQuery & {
+  status?: string;
+  type?: string;
+  trip?: string;
+  unassigned?: boolean;
+  manager?: string;
+  truck?: string;
+  driver?: string;
+};
+
+/**
+ * Manager, truck and driver are properties of the trip carrying a consignment,
+ * not of the consignment itself, so they resolve to a set of trip ids first.
+ *
+ * Returns null when nothing was asked, and an impossible filter when something
+ * was asked and nothing matched — which is the honest answer, and not the same
+ * as "no filter".
+ */
+async function tripRefFilter(
+  query: CargoListQuery,
+  user: ActorLike,
+): Promise<Record<string, unknown> | null> {
+  const tripMatch = mergeFilters(
+    isAdmin(user) && query.manager ? { owner: query.manager } : null,
+    query.truck ? { truck: query.truck } : null,
+    query.driver ? { driver: query.driver } : null,
+  );
+  if (Object.keys(tripMatch).length === 0) return null;
+
+  const trips = await Trip.find(tripMatch).select('_id').lean();
+  return { trip: { $in: trips.map((trip) => trip._id) } };
+}
 
 export async function listCargo(query: CargoListQuery, user: ActorLike) {
   const { sortBy, sortDir } = resolveSort(query, SORT_FIELDS);
@@ -40,6 +71,7 @@ export async function listCargo(query: CargoListQuery, user: ActorLike) {
     query.type ? { type: query.type } : null,
     query.trip ? { trip: query.trip } : null,
     query.unassigned ? { trip: null } : null,
+    await tripRefFilter(query, user),
     searchFilter(query.search, SEARCH_FIELDS),
     dateRangeFilter('createdAt', query.from, query.to),
   );

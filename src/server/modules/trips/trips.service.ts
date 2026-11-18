@@ -53,6 +53,7 @@ type TripListQuery = ListQuery & {
   status?: string;
   driver?: string;
   truck?: string;
+  manager?: string;
   active?: boolean;
 };
 
@@ -77,6 +78,11 @@ export async function listTrips(query: TripListQuery, user: UserDocument) {
     query.active ? { status: { $in: ACTIVE_STATUSES } } : null,
     query.driver && user.role !== 'DRIVER' ? { driver: query.driver } : null,
     query.truck ? { truck: query.truck } : null,
+    // A trip carries its truck's owner, so this is one indexed predicate rather
+    // than a lookup. Administrators only: for a manager the scope above already
+    // decides what they see, and accepting it would only confirm which manager
+    // ids exist.
+    isAdmin(user) && query.manager ? { owner: query.manager } : null,
     searchFilter(query.search, SEARCH_FIELDS),
     dateRangeFilter('startDate', query.from, query.to),
   );

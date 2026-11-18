@@ -28,6 +28,10 @@ export const listCargoQuerySchema = listQuerySchema.extend({
   type: z.enum(CARGO_TYPES).optional(),
   trip: objectId.optional(),
   unassigned: z.coerce.boolean().optional(),
+  /** Narrowed through the carrying trip; `manager` is administrative. */
+  manager: objectId.optional(),
+  truck: objectId.optional(),
+  driver: objectId.optional(),
 });
 
 export type CreateCargoInput = z.infer<typeof createCargoSchema>;

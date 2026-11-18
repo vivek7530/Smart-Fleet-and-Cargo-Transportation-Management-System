@@ -82,6 +82,8 @@ export const listTripsQuerySchema = listQuerySchema.extend({
   status: z.enum(TRIP_STATUSES).optional(),
   driver: objectId.optional(),
   truck: objectId.optional(),
+  /** Administrative: every trip under one manager. Ignored for anyone else. */
+  manager: objectId.optional(),
   /** Convenience filter for everything currently on the road. */
   active: z.coerce.boolean().optional(),
 });

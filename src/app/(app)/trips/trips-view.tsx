@@ -11,6 +11,7 @@ import type { Trip } from '@/lib/types';
 import { useAuth } from '@/components/auth-provider';
 import { useInfiniteList } from '@/hooks/use-infinite-list';
 import { useListState } from '@/hooks/use-list-state';
+import { useFleetFilters } from '@/hooks/use-fleet-filters';
 import { DataList, type Column } from '@/components/data/data-list';
 import { ListToolbar, PageHeader, optionsFrom } from '@/components/data/list-toolbar';
 import { RowActions } from '@/components/data/row-actions';
@@ -30,7 +31,13 @@ export function TripsView({ title, description }: { title: string; description: 
   const { user } = useAuth();
   const isStaff = user?.role === 'ADMIN' || user?.role === 'MANAGER';
 
-  const list = useListState({ defaultSort: 'startDate', filterKeys: ['status', 'active'] });
+  const list = useListState({
+    defaultSort: 'startDate',
+    filterKeys: ['status', 'active', 'manager', 'truck', 'driver'],
+  });
+
+  // A driver's own trips need no who-and-what pickers: every row is theirs.
+  const fleetFilters = useFleetFilters(list, { enabled: isStaff });
 
   const [formOpen, setFormOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<Trip | null>(null);
@@ -182,6 +189,7 @@ export function TripsView({ title, description }: { title: string; description: 
             ],
             onChange: (value) => list.setFilter('active', value),
           },
+          ...fleetFilters,
         ]}
       />
 
