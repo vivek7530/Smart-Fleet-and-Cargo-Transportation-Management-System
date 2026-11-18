@@ -176,7 +176,7 @@ export async function createTruck(input: CreateTruckInput, ctx: Ctx) {
     createdBy: actor._id,
   });
 
-  if (input.assignedDriver) await detachDriverFromOtherTrucks(input.assignedDriver, String(truck._id), owner);
+  if (input.assignedDriver) await detachDriverFromOtherTrucks(input.assignedDriver, String(truck._id), owner, ctx);
 
   await recordAudit({
     ctx,
@@ -245,7 +245,7 @@ export async function updateTruck(id: string, input: UpdateTruckInput, ctx: Ctx)
   }
 
   await truck.save();
-  if (input.assignedDriver) await detachDriverFromOtherTrucks(input.assignedDriver, String(truck._id), truck.owner);
+  if (input.assignedDriver) await detachDriverFromOtherTrucks(input.assignedDriver, String(truck._id), truck.owner, ctx);
 
   await recordAudit({
     ctx,
@@ -277,7 +277,7 @@ export async function assignDriver(id: string, driverId: string | null, ctx: Ctx
     truck.assignedDriver = driver._id;
     if (truck.status === 'AVAILABLE') truck.status = 'ASSIGNED';
     await truck.save();
-    await detachDriverFromOtherTrucks(driverId, String(truck._id), truck.owner);
+    await detachDriverFromOtherTrucks(driverId, String(truck._id), truck.owner, ctx);
 
     await notify({
       users: [driver._id],
@@ -409,16 +409,42 @@ async function assertDriverAssignable(driverId: string, truckOwner: unknown) {
 /**
  * A driver may hold only one truck at a time.
  *
- * Scoped to the trucks of the same manager. Unscoped, assigning a driver could
- * reach across and quietly strip a truck belonging to someone else — and that
- * manager would simply find their truck driverless one morning with nothing in
- * the audit log to explain it.
+ * This reaches across managers on purpose. Scoping it to the new truck's owner
+ * left a driver still attached to a truck from a manager they had since moved
+ * away from, and `getAssignedTruckFor` then had two rows to choose between and
+ * showed whichever one Mongo handed back first — so a driver could open "My
+ * truck" and be shown a vehicle they no longer drive.
+ *
+ * Stripping another manager's truck with nothing to explain it was the original
+ * worry, and it stands, so every detachment that reaches outside the new
+ * truck's owner is written to that truck's audit trail.
  */
-async function detachDriverFromOtherTrucks(driverId: string, keepTruckId: string, owner: unknown) {
-  await Truck.updateMany(
-    { assignedDriver: driverId, _id: { $ne: keepTruckId }, owner: owner ?? null },
-    { assignedDriver: null, $set: { status: 'AVAILABLE' } },
-  );
+async function detachDriverFromOtherTrucks(
+  driverId: string, keepTruckId: string, keepOwner: unknown, ctx: Ctx,
+) {
+  const others = await Truck.find({
+    assignedDriver: driverId,
+    _id: { $ne: keepTruckId },
+  }).select('truckNumber owner status');
+
+  for (const other of others) {
+    other.assignedDriver = null;
+    // Only a truck that was merely spoken for falls back to available. One in
+    // the workshop or out on the road keeps the status it has.
+    if (other.status === 'ASSIGNED') other.status = 'AVAILABLE';
+    await other.save();
+
+    if (refId(other.owner) !== refId(keepOwner)) {
+      await recordAudit({
+        ctx,
+        action: 'TRUCK_DRIVER_UNASSIGNED',
+        summary: `Truck ${other.truckNumber} lost its driver, who was assigned to another manager's truck`,
+        entity: 'Truck',
+        entityId: other._id,
+        metadata: { driverId: String(driverId) },
+      });
+    }
+  }
 }
 
 function sanitiseTruckPatch(input: UpdateTruckInput) {
