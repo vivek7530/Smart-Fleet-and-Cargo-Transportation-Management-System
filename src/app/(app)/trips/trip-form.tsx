@@ -11,6 +11,7 @@ import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { formatWeight, toDateInput } from '@/lib/format';
 import type { Cargo, Page, Trip, Truck, UserRecord } from '@/lib/types';
+import { useAuth } from '@/components/auth-provider';
 import { ResourceDialog, useMutationErrors } from '@/components/data/resource-dialog';
 import { FormField, FormGrid, FormSection } from '@/components/ui/form-field';
 import { Input, Textarea } from '@/components/ui/input';
@@ -78,17 +79,47 @@ export function TripFormDialog({
     form.setError(field as never, { message }),
   );
 
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'ADMIN';
+
+  /**
+   * Which manager's fleet to dispatch from.
+   *
+   * It is never sent: a trip takes its owner from the truck, server-side. It
+   * exists because an administrator sees every truck and every driver at once,
+   * and the two have to come from the same manager — the server rejects a
+   * driver who is not on the owning manager's roster. Choosing the manager
+   * first turns two long lists into two short, compatible ones.
+   */
+  const [managerId, setManagerId] = React.useState('ALL');
+
+  const { data: managers } = useQuery({
+    queryKey: ['users', 'manager-picker'],
+    queryFn: () => api.get<Page<UserRecord>>('/users', { role: 'MANAGER', status: 'ACTIVE', limit: 100 }),
+    enabled: open && isAdmin,
+    staleTime: 60_000,
+  });
+
   // Only vehicles and people that are actually free can be dispatched.
   const { data: trucks } = useQuery({
-    queryKey: ['trucks', 'picker'],
-    queryFn: () => api.get<Page<Truck>>('/trucks', { limit: 100 }),
+    queryKey: ['trucks', 'picker', managerId],
+    queryFn: () =>
+      api.get<Page<Truck>>('/trucks', {
+        limit: 100,
+        ...(isAdmin && managerId !== 'ALL' ? { owner: managerId } : {}),
+      }),
     enabled: open,
     staleTime: 30_000,
   });
 
   const { data: drivers } = useQuery({
-    queryKey: ['drivers', 'picker'],
-    queryFn: () => api.get<Page<UserRecord>>('/drivers', { limit: 100, status: 'ACTIVE' }),
+    queryKey: ['drivers', 'picker', managerId],
+    queryFn: () =>
+      api.get<Page<UserRecord>>('/drivers', {
+        limit: 100,
+        status: 'ACTIVE',
+        ...(isAdmin && managerId !== 'ALL' ? { manager: managerId } : {}),
+      }),
     enabled: open,
     staleTime: 30_000,
   });
@@ -110,6 +141,7 @@ export function TripFormDialog({
   React.useEffect(() => {
     if (!open) return;
     setBannerError(null);
+    setManagerId(trip?.owner?.id ?? 'ALL');
     if (trip) {
       form.reset({
         truck: trip.truck?.id ?? 'NONE',
@@ -248,6 +280,36 @@ export function TripFormDialog({
 
       <FormSection title="Assignment" description="A trip becomes dispatchable once both a truck and a driver are set.">
         <FormGrid>
+          {isAdmin ? (
+            <FormField
+              label="Manager"
+              hint="Narrows the truck and driver below to one manager's fleet. The truck decides who owns the trip."
+            >
+              <Select
+                value={managerId}
+                onValueChange={(value) => {
+                  setManagerId(value);
+                  // Both choices belonged to the previous manager, and the
+                  // server would refuse a driver from another roster.
+                  form.setValue('truck', 'NONE');
+                  form.setValue('driver', 'NONE');
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Every manager" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">Every manager</SelectItem>
+                  {managers?.items.map((manager) => (
+                    <SelectItem key={manager.id} value={manager.id}>
+                      {manager.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </FormField>
+          ) : null}
+
           <FormField label="Truck" error={errors.truck?.message}>
             <Select value={form.watch('truck') || 'NONE'} onValueChange={(value) => form.setValue('truck', value)}>
               <SelectTrigger>
