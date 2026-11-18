@@ -342,12 +342,22 @@ function FuelFormDialog({
   });
 
   const selectedTruck = form.watch('truck');
-  // Fuel goes into one truck, so only that truck's live trips can be the one
-  // it belongs to. Before a truck is chosen, everything is still a candidate.
-  const tripChoices = React.useMemo(
-    () => (trips?.items ?? []).filter((trip) => !selectedTruck || trip.truck?.id === selectedTruck),
-    [trips, selectedTruck],
-  );
+
+  /**
+   * Which trips this fuel could belong to.
+   *
+   * For staff the truck is chosen first, so only that truck's live trips can
+   * be the answer. A driver is the other way round: the truck they are
+   * standing next to is whichever one their trip is on, which is not always
+   * the truck assigned to them on paper. Narrowing by the assigned truck hid
+   * their own running trip, so for a driver every live trip of theirs is
+   * offered and the truck follows from the one they pick.
+   */
+  const tripChoices = React.useMemo(() => {
+    const items = trips?.items ?? [];
+    if (isDriver) return items;
+    return items.filter((trip) => !selectedTruck || trip.truck?.id === selectedTruck);
+  }, [trips, selectedTruck, isDriver]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -432,7 +442,15 @@ function FuelFormDialog({
       <FormGrid>
         <FormField label="Truck" required error={errors.truck?.message}>
           {isDriver ? (
-            <Input value={assignedTruck?.truck?.truckNumber ?? 'No truck assigned'} readOnly disabled />
+            <Input
+              value={
+                tripChoices.find((trip) => trip.id === form.watch('trip'))?.truck?.truckNumber ??
+                assignedTruck?.truck?.truckNumber ??
+                'No truck assigned'
+              }
+              readOnly
+              disabled
+            />
           ) : (
             <Select
               value={form.watch('truck')}
@@ -462,12 +480,27 @@ function FuelFormDialog({
         <FormField
           label="Trip"
           hint={
-            selectedTruck && tripChoices.length === 0
-              ? 'This truck has no trip running.'
-              : 'Optional — links the cost to a trip.'
+            tripChoices.length === 0
+              ? isDriver
+                ? 'You have no trip running.'
+                : 'This truck has no trip running.'
+              : isDriver
+                ? 'Optional — picking a trip sets the truck it is running on.'
+                : 'Optional — links the cost to a trip.'
           }
         >
-          <Select value={form.watch('trip') || 'NONE'} onValueChange={(value) => form.setValue('trip', value)}>
+          <Select
+            value={form.watch('trip') || 'NONE'}
+            onValueChange={(value) => {
+              form.setValue('trip', value);
+              // A driver's fuel goes into the truck that trip is running on,
+              // which is not always the one assigned to them on paper.
+              if (!isDriver) return;
+              const chosen = tripChoices.find((trip) => trip.id === value);
+              if (chosen?.truck) form.setValue('truck', chosen.truck.id);
+              else if (value === 'NONE') form.setValue('truck', assignedTruck?.truck?.id ?? '');
+            }}
+          >
             <SelectTrigger>
               <SelectValue placeholder="Not linked to a trip" />
             </SelectTrigger>

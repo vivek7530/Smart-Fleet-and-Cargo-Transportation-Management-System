@@ -6,7 +6,7 @@ import { ScrollText } from '@/components/icons';
 import { api } from '@/lib/api';
 import { formatDateTime, formatRelative } from '@/lib/format';
 import { humanise } from '@/lib/utils';
-import type { AuditLogEntry } from '@/lib/types';
+import type { AuditLogEntry, Page, UserRecord } from '@/lib/types';
 import { useInfiniteList } from '@/hooks/use-infinite-list';
 import { useListState } from '@/hooks/use-list-state';
 import { DataList, type Column } from '@/components/data/data-list';
@@ -15,7 +15,15 @@ import { Badge } from '@/components/ui/badge';
 import { Avatar, Tooltip } from '@/components/ui/misc';
 
 export default function AuditLogsPage() {
-  const list = useListState({ defaultSort: 'createdAt', filterKeys: ['entity', 'action'] });
+  const list = useListState({ defaultSort: 'createdAt', filterKeys: ['entity', 'action', 'user'] });
+
+  // "What did this person do?" is the first question anyone asks of an audit
+  // trail, and the only way to answer it was to read every row.
+  const { data: people } = useQuery({
+    queryKey: ['users', 'audit-actors'],
+    queryFn: () => api.get<Page<UserRecord>>('/users', { limit: 200 }),
+    staleTime: 60_000,
+  });
 
   const query = useInfiniteList<AuditLogEntry>({ path: '/audit-logs', params: list.params });
 
@@ -99,6 +107,20 @@ export default function AuditLogsPage() {
               ...(facets?.entities ?? []).map((entity) => ({ label: entity, value: entity })),
             ],
             onChange: (value) => list.setFilter('entity', value),
+            primary: true,
+          },
+          {
+            key: 'user',
+            label: 'Person',
+            value: list.filters.user ?? 'ALL',
+            options: [
+              { label: 'Everyone', value: 'ALL' },
+              ...(people?.items ?? []).map((person) => ({
+                label: `${person.name} · ${humanise(person.role)}`,
+                value: person.id,
+              })),
+            ],
+            onChange: (value) => list.setFilter('user', value),
             primary: true,
           },
           {
