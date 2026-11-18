@@ -14,6 +14,7 @@ import type { FuelRecord, Page, Trip, Truck } from '@/lib/types';
 import { useAuth } from '@/components/auth-provider';
 import { useInfiniteList } from '@/hooks/use-infinite-list';
 import { useListState } from '@/hooks/use-list-state';
+import { useFleetFilters } from '@/hooks/use-fleet-filters';
 import { DataList, type Column } from '@/components/data/data-list';
 import { ListToolbar, PageHeader, optionsFrom } from '@/components/data/list-toolbar';
 import { RowActions } from '@/components/data/row-actions';
@@ -32,7 +33,11 @@ export default function FuelPage() {
   const { user } = useAuth();
   const isStaff = user?.role === 'ADMIN' || user?.role === 'MANAGER';
 
-  const list = useListState({ defaultSort: 'date', filterKeys: ['paymentMode'] });
+  const list = useListState({
+    defaultSort: 'date',
+    filterKeys: ['paymentMode', 'manager', 'truck', 'driver'],
+  });
+  const fleetFilters = useFleetFilters(list);
   const [formOpen, setFormOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<FuelRecord | null>(null);
   const [deleting, setDeleting] = React.useState<FuelRecord | null>(null);
@@ -152,6 +157,7 @@ export default function FuelPage() {
             onChange: (value) => list.setFilter('paymentMode', value),
             primary: true,
           },
+          ...fleetFilters,
         ]}
       />
 

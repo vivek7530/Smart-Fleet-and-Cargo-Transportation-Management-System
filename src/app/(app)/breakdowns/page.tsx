@@ -14,6 +14,7 @@ import type { BreakdownReport, Page, Truck } from '@/lib/types';
 import { useAuth } from '@/components/auth-provider';
 import { useInfiniteList } from '@/hooks/use-infinite-list';
 import { useListState } from '@/hooks/use-list-state';
+import { useFleetFilters } from '@/hooks/use-fleet-filters';
 import { DataList, type Column } from '@/components/data/data-list';
 import { ListToolbar, PageHeader, optionsFrom } from '@/components/data/list-toolbar';
 import { RowActions } from '@/components/data/row-actions';
@@ -33,7 +34,11 @@ export default function BreakdownsPage() {
   const { user } = useAuth();
   const isStaff = user?.role === 'ADMIN' || user?.role === 'MANAGER';
 
-  const list = useListState({ defaultSort: 'reportedAt', filterKeys: ['status', 'severity'] });
+  const list = useListState({
+    defaultSort: 'reportedAt',
+    filterKeys: ['status', 'severity', 'manager', 'truck', 'driver'],
+  });
+  const fleetFilters = useFleetFilters(list);
   const [reportOpen, setReportOpen] = React.useState(false);
   const [updating, setUpdating] = React.useState<BreakdownReport | null>(null);
 
@@ -163,6 +168,7 @@ export default function BreakdownsPage() {
             onChange: (value) => list.setFilter('severity', value),
             primary: true,
           },
+          ...fleetFilters,
         ]}
       />
 

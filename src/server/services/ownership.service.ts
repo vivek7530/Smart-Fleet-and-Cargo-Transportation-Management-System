@@ -128,3 +128,45 @@ export async function recipientsForTrip(
   const trip = await Trip.findById(tripId).select('truck').lean();
   return recipientsForTruck((trip?.truck as Types.ObjectId | null) ?? null);
 }
+
+/**
+ * One manager's trucks and trips, for the administrative "show me everything of
+ * theirs" filters on the cost and compliance lists.
+ *
+ * Those collections carry no owner of their own — a fuel receipt knows its
+ * truck, a claim knows its trip — so narrowing them to a manager means
+ * resolving what that manager holds first. Shares count: a truck shared with
+ * them is one they work with, and leaving it out would make the filter disagree
+ * with what that manager actually sees.
+ */
+export async function managerHoldings(
+  managerId: string,
+): Promise<{ truckIds: Types.ObjectId[]; tripIds: Types.ObjectId[] }> {
+  const actor = { _id: new Types.ObjectId(managerId), role: 'MANAGER' };
+  const [trucks, trips] = await Promise.all([
+    Truck.find(ownerScopeFor(actor)).select('_id').lean(),
+    Trip.find(ownerScopeFor(actor)).select('_id').lean(),
+  ]);
+  return {
+    truckIds: trucks.map((truck) => truck._id),
+    tripIds: trips.map((trip) => trip._id),
+  };
+}
+
+/**
+ * A filter fragment for a collection that references a truck, a trip, or both.
+ *
+ * With both named, a record matches on either — which is what a driver claim
+ * needs, since it may be filed against a trip or against a truck alone.
+ */
+export async function managerFilterFor(
+  managerId: string,
+  fields: { truck?: string; trip?: string },
+): Promise<Record<string, unknown>> {
+  const { truckIds, tripIds } = await managerHoldings(managerId);
+  const clauses: Record<string, unknown>[] = [];
+  if (fields.truck) clauses.push({ [fields.truck]: { $in: truckIds } });
+  if (fields.trip) clauses.push({ [fields.trip]: { $in: tripIds } });
+  if (clauses.length === 0) return {};
+  return clauses.length === 1 ? clauses[0] : { $or: clauses };
+}

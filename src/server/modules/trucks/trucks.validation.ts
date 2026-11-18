@@ -57,3 +57,14 @@ export const assignDriverSchema = z.object({
 export type CreateTruckInput = z.infer<typeof createTruckSchema>;
 export type UpdateTruckInput = z.infer<typeof updateTruckSchema>;
 
+/**
+ * Moving a truck to another manager. `owner: null` hands it back to nobody,
+ * which is how an administrator parks a vehicle between managers.
+ */
+export const transferTruckSchema = z.object({
+  owner: objectId.nullable(),
+  /** Take the assigned driver along, instead of detaching them. */
+  moveDriver: z.boolean().optional(),
+});
+
+export type TransferTruckInput = z.infer<typeof transferTruckSchema>;

@@ -10,11 +10,19 @@ import { api } from '@/lib/api';
 import { toDateInput } from '@/lib/format';
 import { humanise } from '@/lib/utils';
 import type { Page, Truck, UserRecord } from '@/lib/types';
+
+interface TransferResult {
+  tripsMoved: number;
+  tripsInherited: number;
+  driverDetached: boolean;
+  driverMoved: boolean;
+}
 import { useAuth } from '@/components/auth-provider';
 import { ResourceDialog, useMutationErrors } from '@/components/data/resource-dialog';
 import { FormField, FormGrid, FormSection } from '@/components/ui/form-field';
 import { Input, Textarea } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/misc';
 
 const TRUCK_STATUSES = ['AVAILABLE', 'ASSIGNED', 'IN_TRIP', 'MAINTENANCE', 'INACTIVE'] as const;
 const FUEL_TYPES = ['DIESEL', 'PETROL', 'CNG', 'LNG', 'ELECTRIC'] as const;
@@ -36,6 +44,8 @@ const truckSchema = z.object({
   fuelType: z.enum(FUEL_TYPES),
   status: z.enum(TRUCK_STATUSES),
   owner: z.string().optional(),
+  /** Transfer only: take the assigned driver to the new manager too. */
+  moveDriver: z.boolean().optional(),
   assignedDriver: z.string().optional(),
   odometerKm: z.coerce.number().min(0, 'Odometer cannot be negative').multipleOf(0.1).optional(),
   mileageKmPerLitre: z.union([z.literal(''), z.coerce.number().min(0).max(100)]).optional(),
@@ -63,6 +73,7 @@ const emptyValues: TruckValues = {
   fuelType: 'DIESEL',
   status: 'AVAILABLE',
   owner: 'NONE',
+  moveDriver: false,
   assignedDriver: 'NONE',
   odometerKm: 0,
   mileageKmPerLitre: '',
@@ -100,6 +111,8 @@ export function TruckFormDialog({
   );
 
   const owner = form.watch('owner');
+  // What the transfer reported, held between the mutation and its toast.
+  const transferNote = React.useRef<TransferResult | null>(null);
 
   const { data: managers } = useQuery({
     queryKey: ['users', 'manager-picker'],
@@ -142,6 +155,7 @@ export function TruckFormDialog({
             fuelType: truck.fuelType,
             status: truck.status,
             owner: truck.owner?.id ?? 'NONE',
+            moveDriver: false,
             assignedDriver: truck.assignedDriver?.id ?? 'NONE',
             odometerKm: truck.odometerKm,
             mileageKmPerLitre: truck.mileageKmPerLitre ?? '',
@@ -161,7 +175,7 @@ export function TruckFormDialog({
   }, [open, truck, form, setBannerError]);
 
   const mutation = useMutation({
-    mutationFn: (values: TruckValues) => {
+    mutationFn: async (values: TruckValues) => {
       const payload = {
         ...values,
         assignedDriver: values.assignedDriver === 'NONE' ? null : values.assignedDriver,
@@ -176,15 +190,48 @@ export function TruckFormDialog({
         permitExpiry: values.permitExpiry || null,
         purchaseDate: values.purchaseDate || null,
       };
-      return isEdit
-        ? api.patch<{ truck: Truck }>(`/trucks/${truck!.id}`, payload)
-        : api.post<{ truck: Truck }>('/trucks', payload);
+      if (!isEdit) return api.post<{ truck: Truck }>('/trucks', payload);
+
+      /**
+       * Changing the manager on an existing truck is a transfer, not an edit:
+       * the unfinished trips and the driver move with it, so PATCH refuses the
+       * field outright. Send the transfer first, then the rest of the form
+       * without it — if the transfer fails, nothing else is saved either.
+       */
+      const { owner, ...rest } = payload;
+      if (isAdmin && owner !== (truck!.owner?.id ?? null)) {
+        const moved = await api.post<TransferResult>(`/trucks/${truck!.id}/transfer`, {
+          owner,
+          moveDriver: Boolean(values.moveDriver),
+        });
+        transferNote.current = moved;
+      }
+      return api.patch<{ truck: Truck }>(`/trucks/${truck!.id}`, rest);
     },
     onSuccess(result) {
       queryClient.invalidateQueries({ queryKey: ['/trucks'] });
       queryClient.invalidateQueries({ queryKey: ['truck', truck?.id] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
-      toast.success(isEdit ? `Truck ${result.truck.truckNumber} updated` : `Truck ${result.truck.truckNumber} added`);
+      queryClient.invalidateQueries({ queryKey: ['/drivers'] });
+      queryClient.invalidateQueries({ queryKey: ['/trucks/by-manager'] });
+
+      const moved = transferNote.current;
+      transferNote.current = null;
+      if (moved) {
+        // Say what the transfer actually did, since some of it is invisible
+        // on the form the administrator just filled in.
+        const parts = [
+          moved.tripsMoved > 0 ? `${moved.tripsMoved} trip${moved.tripsMoved === 1 ? '' : 's'} moved` : null,
+          moved.tripsInherited > 0 ? `${moved.tripsInherited} finished left with the previous manager` : null,
+          moved.driverMoved ? 'the driver came along' : null,
+          moved.driverDetached ? 'the driver was detached' : null,
+        ].filter(Boolean);
+        toast.success(`Truck ${result.truck.truckNumber} transferred`, {
+          description: parts.length ? `${parts.join(' · ')}.` : undefined,
+        });
+      } else {
+        toast.success(isEdit ? `Truck ${result.truck.truckNumber} updated` : `Truck ${result.truck.truckNumber} added`);
+      }
       onOpenChange(false);
     },
     onError: handleError,
@@ -323,6 +370,23 @@ export function TruckFormDialog({
                   ))}
                 </SelectContent>
               </Select>
+
+              {/* A transfer leaves the driver behind by default, because they
+                  work for the old manager, not for the vehicle. */}
+              {isEdit && owner !== (truck?.owner?.id ?? 'NONE') && truck?.assignedDriver ? (
+                <label className="mt-2 flex cursor-pointer items-start gap-2 rounded-lg border bg-muted/40 px-3 py-2.5 text-xs leading-relaxed">
+                  <Checkbox
+                    checked={form.watch('moveDriver') ?? false}
+                    onCheckedChange={(checked) => form.setValue('moveDriver', checked === true)}
+                    className="mt-0.5"
+                  />
+                  <span className="text-muted-foreground">
+                    Move <span className="font-medium text-foreground">{truck.assignedDriver.name}</span> to this
+                    manager&apos;s roster too. Otherwise they stay with the current manager and the truck is left
+                    without a driver.
+                  </span>
+                </label>
+              ) : null}
             </FormField>
           ) : null}
 

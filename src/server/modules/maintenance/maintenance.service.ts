@@ -18,7 +18,8 @@ import { MAINTENANCE_STATUSES, MAINTENANCE_TYPES } from '../../types/enums';
 import { dateString, objectId, optionalDateString } from '../shared';
 import type { Ctx } from '../../api/context';
 import { advanceTruckOdometer } from '../../services/odometer.service';
-import { requireTruckAccess, truckScopeFilter } from '../../services/ownership.service';
+import { managerFilterFor, requireTruckAccess, truckScopeFilter } from '../../services/ownership.service';
+import { isAdmin } from '../../lib/ownership';
 
 export const createMaintenanceSchema = z.object({
   truck: objectId,
@@ -46,6 +47,8 @@ export const listMaintenanceQuerySchema = listQuerySchema.extend({
   truck: objectId.optional(),
   type: z.enum(MAINTENANCE_TYPES).optional(),
   status: z.enum(MAINTENANCE_STATUSES).optional(),
+  /** Administrative: everything belonging to one manager. Ignored for anyone else. */
+  manager: objectId.optional(),
 });
 
 const POPULATE = [{ path: 'truck', select: 'truckNumber registrationNumber make model status' }];
@@ -68,6 +71,7 @@ export async function listMaintenance(query: z.infer<typeof listMaintenanceQuery
     query.truck && ctx.user.role !== 'DRIVER' ? { truck: query.truck } : null,
     query.type ? { type: query.type } : null,
     query.status ? { status: query.status } : null,
+    isAdmin(ctx.user) && query.manager ? await managerFilterFor(query.manager, { truck: 'truck' }) : null,
     searchFilter(query.search, ['description', 'serviceProvider']),
     dateRangeFilter('date', query.from, query.to),
   );

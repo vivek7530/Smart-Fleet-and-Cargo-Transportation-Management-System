@@ -21,6 +21,7 @@ import {
   accessibleTruckIds,
   requireTripAccess,
   requireTruckAccess,
+  managerFilterFor,
 } from '../../services/ownership.service';
 import { isAdmin, type ActorLike } from '../../lib/ownership';
 
@@ -79,6 +80,8 @@ export const listDocumentsQuerySchema = listQuerySchema.extend({
   trip: objectId.optional(),
   /** Documents expiring within the next N days (or already expired). */
   expiring: z.coerce.number().int().min(1).max(365).optional(),
+  /** Administrative: everything belonging to one manager. Ignored for anyone else. */
+  manager: objectId.optional(),
 });
 
 const POPULATE = [
@@ -129,6 +132,9 @@ export async function listDocuments(query: z.infer<typeof listDocumentsQuerySche
     query.truck ? { truck: query.truck } : null,
     query.driver && ctx.user.role !== 'DRIVER' ? { driver: query.driver } : null,
     query.trip ? { trip: query.trip } : null,
+    isAdmin(ctx.user) && query.manager
+      ? await managerFilterFor(query.manager, { truck: 'truck', trip: 'trip' })
+      : null,
     expiringFilter,
     searchFilter(query.search, ['name', 'referenceNumber', 'issuedBy', 'notes']),
     dateRangeFilter('createdAt', query.from, query.to),

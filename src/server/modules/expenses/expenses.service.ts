@@ -23,6 +23,7 @@ import {
   requireTripAccess,
   requireTruckAccess,
   truckScopeFilter,
+  managerFilterFor,
 } from '../../services/ownership.service';
 import { isAdmin, refId } from '../../lib/ownership';
 
@@ -55,6 +56,8 @@ export const listExpensesQuerySchema = listQuerySchema.extend({
   type: z.enum(DRIVER_EXPENSE_TYPES).optional(),
   driver: objectId.optional(),
   trip: objectId.optional(),
+  /** Administrative: everything belonging to one manager. Ignored for anyone else. */
+  manager: objectId.optional(),
 });
 
 const POPULATE = [
@@ -74,6 +77,11 @@ export async function listExpenses(query: z.infer<typeof listExpensesQuerySchema
     query.status ? { status: query.status } : null,
     query.type ? { type: query.type } : null,
     query.trip ? { trip: query.trip } : null,
+    // A claim is filed against a trip, or against a truck alone, so either side
+    // may be what ties it to a manager.
+    isAdmin(ctx.user) && query.manager
+      ? await managerFilterFor(query.manager, { truck: 'truck', trip: 'trip' })
+      : null,
     searchFilter(query.search, ['description', 'receiptNumber', 'rejectionReason']),
     dateRangeFilter('date', query.from, query.to),
   );

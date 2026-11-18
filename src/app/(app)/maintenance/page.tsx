@@ -14,6 +14,7 @@ import type { MaintenanceRecord, Page, Truck } from '@/lib/types';
 import { useAuth } from '@/components/auth-provider';
 import { useInfiniteList } from '@/hooks/use-infinite-list';
 import { useListState } from '@/hooks/use-list-state';
+import { useFleetFilters } from '@/hooks/use-fleet-filters';
 import { DataList, type Column } from '@/components/data/data-list';
 import { ListToolbar, PageHeader, optionsFrom } from '@/components/data/list-toolbar';
 import { RowActions } from '@/components/data/row-actions';
@@ -44,7 +45,11 @@ export default function MaintenancePage() {
   const { user } = useAuth();
   const isStaff = user?.role === 'ADMIN' || user?.role === 'MANAGER';
 
-  const list = useListState({ defaultSort: 'date', filterKeys: ['status', 'type'] });
+  const list = useListState({
+    defaultSort: 'date',
+    filterKeys: ['status', 'type', 'manager', 'truck'],
+  });
+  const fleetFilters = useFleetFilters(list, { include: ['manager', 'truck'] });
   const [formOpen, setFormOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<MaintenanceRecord | null>(null);
   const [deleting, setDeleting] = React.useState<MaintenanceRecord | null>(null);
@@ -177,6 +182,7 @@ export default function MaintenancePage() {
             options: optionsFrom(MAINTENANCE_TYPES as unknown as string[], 'All types'),
             onChange: (value) => list.setFilter('type', value),
           },
+          ...fleetFilters,
         ]}
       />
 

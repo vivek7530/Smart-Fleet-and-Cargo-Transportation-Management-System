@@ -368,6 +368,7 @@ async function assertOwnerIsManager(ownerId: string) {
   const manager = await User.findOne({ _id: ownerId, role: 'MANAGER' }).select('status');
   if (!manager) throw ApiError.badRequest('The selected owner is not a manager');
   if (manager.status !== 'ACTIVE') throw ApiError.badRequest('Only an active manager can own a truck');
+  return manager;
 }
 
 /**
@@ -677,5 +678,157 @@ export async function listFleetByManager(): Promise<ManagerFleetReport> {
       assignedDrivers: drivers.length - unassignedDrivers.length,
       unassignedDrivers: unassignedDrivers.length,
     },
+  };
+}
+
+/* -------------------------------------------------------------------------- *
+ * Transfer
+ * -------------------------------------------------------------------------- */
+
+export interface TransferTruckResult {
+  truck: TruckDocument;
+  /** Trips moved onto the new manager — the ones not yet finished. */
+  tripsMoved: number;
+  /** Finished trips left attributed to the previous manager. */
+  tripsInherited: number;
+  /** The driver, if they could not come along. */
+  driverDetached: boolean;
+  /** The driver, if they were moved onto the new manager's roster too. */
+  driverMoved: boolean;
+}
+
+/**
+ * Hands a truck to a different manager.
+ *
+ * `updateTruck` has always refused to do this, pointing at "the transfer
+ * action" — which did not exist, so until now a truck could only ever be given
+ * an owner at the moment it was created. This is that action.
+ *
+ * A transfer is not a field edit. Four things move together, and getting any
+ * one of them wrong leaves the fleet in a state nobody can explain:
+ *
+ *   - **Ownership history** gains a closing date on the old stretch and a new
+ *     open one, so "who held this truck in March?" stays answerable.
+ *   - **Unfinished trips** follow the truck. They are work still to be done,
+ *     and the new manager is the one who has to do it.
+ *   - **Finished trips** stay where they are and are stamped `inheritedFrom`,
+ *     which hides their figures from the new owner. That money was earned
+ *     under someone else; crediting it to whoever holds the truck today would
+ *     corrupt every report that asks who earned what.
+ *   - **The driver** belongs to the old manager's roster, not to the truck. By
+ *     default they are detached — a truck that keeps a driver its new manager
+ *     cannot see would be refused by every later edit. `moveDriver` instead
+ *     transfers them too, which is usually what an administrator means when a
+ *     whole operation changes hands.
+ *
+ * A truck in the middle of a journey is refused outright. Transferring under a
+ * moving trip would hand the new manager a vehicle they cannot account for and
+ * strip the old one of a trip they are still running.
+ */
+export async function transferTruck(
+  id: string,
+  input: { owner: string | null; moveDriver?: boolean },
+  ctx: Ctx,
+): Promise<TransferTruckResult> {
+  const actor = ctx.user;
+  if (!isAdmin(actor)) {
+    throw ApiError.forbidden('Only an administrator can move a truck to another manager');
+  }
+
+  const truck = await Truck.findById(id);
+  if (!truck) throw ApiError.notFound('That truck could not be found');
+
+  const previousOwner = truck.owner ?? null;
+  if (refId(previousOwner) === refId(input.owner)) {
+    throw ApiError.badRequest('This truck already belongs to that manager');
+  }
+
+  const nextOwner = input.owner ? (await assertOwnerIsManager(input.owner))._id : null;
+
+  const inProgress = await Trip.exists({
+    truck: truck._id,
+    status: { $in: ['LOADING', 'IN_TRANSIT'] },
+  });
+  if (inProgress) {
+    throw ApiError.conflict(
+      'This truck has a trip in progress. Complete or cancel it before transferring the truck.',
+    );
+  }
+
+  // Unfinished work follows the truck; finished work stays with whoever earned
+  // it, flagged so the new owner sees the trip but not its figures.
+  const [moved, inherited] = await Promise.all([
+    Trip.updateMany(
+      { truck: truck._id, status: { $nin: ['COMPLETED', 'CANCELLED'] } },
+      { $set: { owner: nextOwner, sharedWith: truck.sharedWith ?? [] } },
+    ),
+    previousOwner
+      ? Trip.updateMany(
+          { truck: truck._id, status: { $in: ['COMPLETED', 'CANCELLED'] }, inheritedFrom: null },
+          { $set: { inheritedFrom: previousOwner } },
+        )
+      : Promise.resolve({ modifiedCount: 0 }),
+  ]);
+
+  // The driver answers to a manager, not to a vehicle.
+  const driverId = truck.assignedDriver ?? null;
+  let driverMoved = false;
+  let driverDetached = false;
+
+  if (driverId) {
+    if (input.moveDriver && nextOwner) {
+      await User.updateOne({ _id: driverId, role: 'DRIVER' }, { $set: { manager: nextOwner } });
+      driverMoved = true;
+    } else {
+      truck.assignedDriver = null;
+      if (truck.status === 'ASSIGNED') truck.status = 'AVAILABLE';
+      driverDetached = true;
+    }
+  }
+
+  // Close the outgoing stretch of history before opening the next one.
+  const now = new Date();
+  const open = truck.ownerHistory.find((entry) => !entry.to);
+  if (open) open.to = now;
+  truck.ownerHistory.push({ owner: nextOwner, from: now, to: null });
+
+  truck.owner = nextOwner;
+  await truck.save();
+
+  const [from, to] = await Promise.all([
+    previousOwner ? User.findById(previousOwner).select('name').lean() : null,
+    nextOwner ? User.findById(nextOwner).select('name').lean() : null,
+  ]);
+
+  await recordAudit({
+    ctx,
+    action: 'TRUCK_UPDATED',
+    summary: `${actor.name} transferred truck ${truck.truckNumber} from ${from?.name ?? 'nobody'} to ${to?.name ?? 'nobody'}`,
+    entity: 'Truck',
+    entityId: truck._id,
+    metadata: {
+      previousOwner: previousOwner ? String(previousOwner) : null,
+      owner: nextOwner ? String(nextOwner) : null,
+      tripsMoved: moved.modifiedCount,
+      tripsInherited: inherited.modifiedCount,
+      driverMoved,
+      driverDetached,
+    },
+  });
+
+  // Both sides hear about it: one has lost a truck, the other has gained one.
+  await notify({
+    users: [previousOwner, nextOwner].filter(Boolean) as Types.ObjectId[],
+    type: 'GENERAL',
+    title: 'A truck changed hands',
+    message: `${truck.truckNumber} moved from ${from?.name ?? 'nobody'} to ${to?.name ?? 'nobody'}.`,
+  });
+
+  return {
+    truck,
+    tripsMoved: moved.modifiedCount,
+    tripsInherited: inherited.modifiedCount,
+    driverDetached,
+    driverMoved,
   };
 }

@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle,
   ChevronDown,
@@ -14,7 +14,8 @@ import {
   Steering,
   Truck as TruckIcon,
 } from '@/components/icons';
-import { api } from '@/lib/api';
+import { toast } from 'sonner';
+import { api, errorMessage } from '@/lib/api';
 import { cn, humanise } from '@/lib/utils';
 import { formatNumber } from '@/lib/format';
 import type {
@@ -24,6 +25,8 @@ import type {
   ManagerFleetTruck,
 } from '@/lib/types';
 import { ListToolbar, optionsFrom, type FilterConfig } from '@/components/data/list-toolbar';
+import { useFleetFilterOptions } from '@/hooks/use-fleet-filters';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Avatar, Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/misc';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -281,6 +284,7 @@ const DANGER_LEAD = (
  * -------------------------------------------------------------------------- */
 
 function TrucksByManager({ report }: { report: ManagerFleetReport }) {
+  const queryClient = useQueryClient();
   const [search, setSearch] = React.useState('');
   const [managerId, setManagerId] = React.useState('ALL');
   const [status, setStatus] = React.useState('ALL');
@@ -443,8 +447,13 @@ function TrucksByManager({ report }: { report: ManagerFleetReport }) {
           open={collapse.isOpen('__unowned__')}
           onToggle={() => collapse.toggle('__unowned__')}
           title={<span className="font-medium text-destructive">No manager assigned</span>}
-          subtitle="Nobody holds these trucks, so no manager can see or use them. Open each one and set an owner."
+          subtitle="Nobody holds these trucks, so no manager can see or use them."
         >
+          <AssignAll
+            ids={unowned.map((truck) => truck.id)}
+            kind="truck"
+            onDone={() => queryClient.invalidateQueries({ queryKey: ['/trucks/by-manager'] })}
+          />
           <TruckTable trucks={unowned} />
         </GroupCard>
       ) : null}
@@ -545,6 +554,7 @@ function TruckTable({ trucks }: { trucks: ManagerFleetTruck[] }) {
  * -------------------------------------------------------------------------- */
 
 function DriversByManager({ report }: { report: ManagerFleetReport }) {
+  const queryClient = useQueryClient();
   const [search, setSearch] = React.useState('');
   const [managerId, setManagerId] = React.useState('ALL');
   const [status, setStatus] = React.useState('ALL');
@@ -721,8 +731,13 @@ function DriversByManager({ report }: { report: ManagerFleetReport }) {
           open={collapse.isOpen('__unmanaged__')}
           onToggle={() => collapse.toggle('__unmanaged__')}
           title={<span className="font-medium text-destructive">No manager assigned</span>}
-          subtitle="Nobody manages these drivers, so no manager can see them, their trips or their claims. Open each one and set a manager."
+          subtitle="Nobody manages these drivers, so no manager can see them, their trips or their claims."
         >
+          <AssignAll
+            ids={unmanaged.map((driver) => driver.id)}
+            kind="driver"
+            onDone={() => queryClient.invalidateQueries({ queryKey: ['/trucks/by-manager'] })}
+          />
           <DriverTable drivers={unmanaged} />
         </GroupCard>
       ) : null}
@@ -826,6 +841,109 @@ function TableHead({ columns, labels }: { columns: string; labels: string[] }) {
       {labels.map((label) => (
         <span key={label}>{label}</span>
       ))}
+    </div>
+  );
+}
+
+/**
+ * Hands every record in the unassigned group to one manager at once.
+ *
+ * Ownership could only be set one record at a time, which is fine for the one
+ * truck that slipped through and useless for the dozen that were created
+ * before ownership existed. That is the common case, and it is the reason this
+ * group is usually the biggest one on the page.
+ *
+ * Each record is still sent as its own request. They are few, the endpoints
+ * already audit and notify correctly one at a time, and a half-finished batch
+ * leaves a comprehensible state: the ones that went through are assigned, the
+ * rest are still sitting here.
+ */
+function AssignAll({
+  ids,
+  kind,
+  onDone,
+}: {
+  ids: string[];
+  kind: 'truck' | 'driver';
+  onDone: () => void;
+}) {
+  const [managerId, setManagerId] = React.useState('NONE');
+
+  const assign = useMutation({
+    mutationFn: async (target: string) => {
+      let done = 0;
+      const failures: string[] = [];
+      for (const id of ids) {
+        try {
+          await (kind === 'truck'
+            ? api.post(`/trucks/${id}/transfer`, { owner: target, moveDriver: false })
+            : api.patch(`/users/${id}`, { manager: target }));
+          done += 1;
+        } catch (error) {
+          failures.push(errorMessage(error));
+        }
+      }
+      return { done, failures };
+    },
+    onSuccess({ done, failures }) {
+      onDone();
+      const noun = kind === 'truck' ? 'truck' : 'driver';
+      if (done > 0) {
+        toast.success(`${done} ${noun}${done === 1 ? '' : 's'} assigned`);
+      }
+      if (failures.length) {
+        // The first reason is enough: a batch usually fails for one reason.
+        toast.error(`${failures.length} could not be assigned`, { description: failures[0] });
+      }
+      setManagerId('NONE');
+    },
+    onError: (error) => toast.error(errorMessage(error, 'Could not assign these records.')),
+  });
+
+  const { managerOptions } = useFleetFilterOptions();
+  const choices = managerOptions.filter((option) => option.value !== 'ALL');
+
+  return (
+    <div
+      className="flex flex-wrap items-center gap-2 border-t bg-destructive-soft/20 px-4 py-3"
+      // The row sits inside the group's header button in the layout, but is not
+      // part of it: clicking a control here must not collapse the group.
+      onClick={(event) => event.stopPropagation()}
+    >
+      <span className="text-xs text-muted-foreground">
+        Assign all {ids.length} to
+      </span>
+
+      <Select value={managerId} onValueChange={setManagerId} disabled={assign.isPending}>
+        <SelectTrigger className="h-8 w-auto min-w-[11rem]">
+          <SelectValue placeholder="Choose a manager" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="NONE" disabled>
+            Choose a manager
+          </SelectItem>
+          {choices.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+
+      <Button
+        size="sm"
+        disabled={managerId === 'NONE' || assign.isPending}
+        loading={assign.isPending}
+        onClick={() => assign.mutate(managerId)}
+      >
+        Assign all
+      </Button>
+
+      {kind === 'truck' ? (
+        <span className="text-xs text-muted-foreground">
+          Unfinished trips move with each truck; drivers stay where they are.
+        </span>
+      ) : null}
     </div>
   );
 }

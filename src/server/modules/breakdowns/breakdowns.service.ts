@@ -18,7 +18,13 @@ import { notify, toId } from '../../services/notification.service';
 import { BREAKDOWN_SEVERITIES, BREAKDOWN_STATUSES } from '../../types/enums';
 import { dateString, objectId } from '../shared';
 import type { Ctx } from '../../api/context';
-import { recipientsForTruck, requireTruckAccess, truckScopeFilter } from '../../services/ownership.service';
+import {
+  managerFilterFor,
+  recipientsForTruck,
+  requireTruckAccess,
+  truckScopeFilter,
+} from '../../services/ownership.service';
+import { isAdmin } from '../../lib/ownership';
 
 export const createBreakdownSchema = z.object({
   truck: objectId,
@@ -39,6 +45,8 @@ export const listBreakdownsQuerySchema = listQuerySchema.extend({
   severity: z.enum(BREAKDOWN_SEVERITIES).optional(),
   truck: objectId.optional(),
   driver: objectId.optional(),
+  /** Administrative: everything belonging to one manager. Ignored for anyone else. */
+  manager: objectId.optional(),
 });
 
 const POPULATE = [
@@ -58,6 +66,7 @@ export async function listBreakdowns(query: z.infer<typeof listBreakdownsQuerySc
     query.status ? { status: query.status } : null,
     query.severity ? { severity: query.severity } : null,
     query.truck ? { truck: query.truck } : null,
+    isAdmin(ctx.user) && query.manager ? await managerFilterFor(query.manager, { truck: 'truck' }) : null,
     searchFilter(query.search, ['reportCode', 'location', 'description']),
     dateRangeFilter('reportedAt', query.from, query.to),
   );

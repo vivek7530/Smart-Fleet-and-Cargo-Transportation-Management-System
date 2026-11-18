@@ -15,7 +15,13 @@ import { recordAudit } from '../../services/audit.service';
 import { recalculateTripFinancials } from '../trips/trips.service';
 import { dateString, objectId } from '../shared';
 import type { Ctx } from '../../api/context';
-import { requireTripAccess, requireTruckAccess, truckScopeFilter } from '../../services/ownership.service';
+import {
+  managerFilterFor,
+  requireTripAccess,
+  requireTruckAccess,
+  truckScopeFilter,
+} from '../../services/ownership.service';
+import { isAdmin } from '../../lib/ownership';
 import { advanceTruckOdometer } from '../../services/odometer.service';
 
 const PAYMENT_MODES = ['CASH', 'CARD', 'FUEL_CARD', 'CREDIT', 'UPI'] as const;
@@ -40,6 +46,8 @@ export const listFuelQuerySchema = listQuerySchema.extend({
   trip: objectId.optional(),
   driver: objectId.optional(),
   paymentMode: z.enum(PAYMENT_MODES).optional(),
+  /** Administrative: everything belonging to one manager. Ignored for anyone else. */
+  manager: objectId.optional(),
 });
 
 const POPULATE = [
@@ -61,6 +69,7 @@ export async function listFuel(query: ListQuery, ctx: Ctx) {
     query.truck ? { truck: query.truck } : null,
     query.trip ? { trip: query.trip } : null,
     query.paymentMode ? { paymentMode: query.paymentMode } : null,
+    isAdmin(ctx.user) && query.manager ? await managerFilterFor(query.manager, { truck: 'truck' }) : null,
     searchFilter(query.search, ['station', 'location', 'notes']),
     dateRangeFilter('date', query.from, query.to),
   );

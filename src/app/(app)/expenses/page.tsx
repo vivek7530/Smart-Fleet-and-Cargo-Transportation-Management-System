@@ -14,6 +14,7 @@ import type { DriverExpense, Page, Trip, UserRecord } from '@/lib/types';
 import { useAuth } from '@/components/auth-provider';
 import { useInfiniteList } from '@/hooks/use-infinite-list';
 import { useListState } from '@/hooks/use-list-state';
+import { useFleetFilters } from '@/hooks/use-fleet-filters';
 import { DataList, type Column } from '@/components/data/data-list';
 import { ListToolbar, PageHeader, optionsFrom } from '@/components/data/list-toolbar';
 import { RowActions } from '@/components/data/row-actions';
@@ -34,7 +35,11 @@ export default function ExpensesPage() {
   const { user } = useAuth();
   const isStaff = user?.role === 'ADMIN' || user?.role === 'MANAGER';
 
-  const list = useListState({ defaultSort: 'date', filterKeys: ['status', 'type'] });
+  const list = useListState({
+    defaultSort: 'date',
+    filterKeys: ['status', 'type', 'manager', 'driver'],
+  });
+  const fleetFilters = useFleetFilters(list, { include: ['manager', 'driver'] });
   const [formOpen, setFormOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<DriverExpense | null>(null);
   const [rejecting, setRejecting] = React.useState<DriverExpense | null>(null);
@@ -221,6 +226,7 @@ export default function ExpensesPage() {
             options: optionsFrom(EXPENSE_TYPES as unknown as string[], 'All types'),
             onChange: (value) => list.setFilter('type', value),
           },
+          ...fleetFilters,
         ]}
       />
 

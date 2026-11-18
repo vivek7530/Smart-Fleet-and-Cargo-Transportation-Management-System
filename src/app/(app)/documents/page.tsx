@@ -14,6 +14,7 @@ import type { DocumentRecord, Page, Trip, Truck, UserRecord } from '@/lib/types'
 import { useAuth } from '@/components/auth-provider';
 import { useInfiniteList } from '@/hooks/use-infinite-list';
 import { useListState } from '@/hooks/use-list-state';
+import { useFleetFilters } from '@/hooks/use-fleet-filters';
 import { DataList, type Column } from '@/components/data/data-list';
 import { ListToolbar, PageHeader, optionsFrom } from '@/components/data/list-toolbar';
 import { RowActions } from '@/components/data/row-actions';
@@ -50,8 +51,9 @@ export default function DocumentsPage() {
   const list = useListState({
     defaultSort: 'expiryDate',
     defaultSortDir: 'asc',
-    filterKeys: ['status', 'type', 'ownerType', 'expiring'],
+    filterKeys: ['manager', 'truck', 'driver', 'status', 'type', 'ownerType', 'expiring'],
   });
+  const fleetFilters = useFleetFilters(list);
 
   const [formOpen, setFormOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<DocumentRecord | null>(null);
@@ -207,6 +209,7 @@ export default function DocumentsPage() {
             options: optionsFrom(OWNER_TYPES as unknown as string[], 'Anything'),
             onChange: (value) => list.setFilter('ownerType', value),
           },
+          ...fleetFilters,
         ]}
       />
 
