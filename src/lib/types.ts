@@ -211,6 +211,60 @@ export interface ManagerFleetGroup {
   trucks: ManagerFleetTruck[];
 }
 
+/** The signed-in manager's own fleet — see /my-fleet. */
+export interface MyFleetTruck {
+  id: string;
+  truckNumber: string;
+  registrationNumber: string;
+  make: string;
+  model: string;
+  year: number;
+  capacityTons: number;
+  status: TruckStatus;
+  assignedDriver: { id: string; name: string; avatarColor?: string } | null;
+  /** VIEW or EDIT when the truck is another manager's, shared with this one. */
+  access: 'OWNER' | 'VIEW' | 'EDIT';
+}
+
+export interface MyFleetDriver {
+  id: string;
+  name: string;
+  mobile?: string | null;
+  email?: string | null;
+  avatarColor?: string;
+  status: UserStatus;
+  licenseNumber?: string | null;
+  licenseExpiry?: string | null;
+  assignedTruck: { id: string; truckNumber: string } | null;
+  activeTripCount: number;
+}
+
+export interface MyFleetTrip {
+  id: string;
+  tripCode: string;
+  status: TripStatus;
+  pickupLocation: string;
+  deliveryLocation: string;
+  startDate: string;
+  expectedDeliveryDate: string;
+  truck: { id: string; truckNumber: string } | null;
+  driver: { id: string; name: string; avatarColor?: string } | null;
+}
+
+export interface MyFleetReport {
+  trucks: MyFleetTruck[];
+  drivers: MyFleetDriver[];
+  trips: MyFleetTrip[];
+  totals: {
+    trucks: number;
+    sharedTrucks: number;
+    drivers: number;
+    activeTrips: number;
+    trucksOnRoad: number;
+    driversAvailable: number;
+  };
+}
+
 export interface ManagerFleetReport {
   groups: ManagerFleetGroup[];
   /** Trucks nobody holds yet. */

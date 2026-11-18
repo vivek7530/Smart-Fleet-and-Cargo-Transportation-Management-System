@@ -58,6 +58,13 @@ export const NAV_SECTIONS: NavSection[] = [
       { label: 'My Trips', href: '/my-trips', icon: Route, roles: ['DRIVER'], description: 'Trips assigned to you' },
       { label: 'Trucks', href: '/trucks', icon: Truck, roles: STAFF, description: 'The vehicle fleet' },
       { label: 'My Truck', href: '/my-truck', icon: Truck, roles: ['DRIVER'], description: 'The truck assigned to you' },
+      {
+        label: 'My Fleet',
+        href: '/my-fleet',
+        icon: Truck,
+        roles: ['MANAGER'],
+        description: 'Your trucks, drivers and live trips',
+      },
       { label: 'Cargo', href: '/cargo', icon: Package, roles: STAFF, description: 'Consignments and shipments' },
       { label: 'Drivers', href: '/drivers', icon: Steering, roles: STAFF, description: 'Driver roster' },
     ],
