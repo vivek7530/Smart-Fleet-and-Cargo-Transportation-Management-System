@@ -436,10 +436,10 @@ function CargoFormDialog({
 
       <FormSection title="Route">
         <FormGrid>
-          <FormField label="Origin" htmlFor="origin" required error={errors.origin?.message}>
+          <FormField label="Pickup location" htmlFor="origin" required error={errors.origin?.message}>
             <Input id="origin" placeholder="Mumbai, MH" invalid={Boolean(errors.origin)} {...form.register('origin')} />
           </FormField>
-          <FormField label="Destination" htmlFor="destination" required error={errors.destination?.message}>
+          <FormField label="Delivery location" htmlFor="destination" required error={errors.destination?.message}>
             <Input
               id="destination"
               placeholder="Delhi, DL"

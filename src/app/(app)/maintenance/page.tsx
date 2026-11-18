@@ -27,7 +27,7 @@ import { ListToolbar, PageHeader, optionsFrom } from '@/components/data/list-too
 import { RowActions } from '@/components/data/row-actions';
 import { OdometerCorrectionDialog } from '@/components/data/odometer-correction';
 import { ResourceDialog, useMutationErrors } from '@/components/data/resource-dialog';
-import { FormField, FormGrid } from '@/components/ui/form-field';
+import { FormField, FormGrid, FormSection } from '@/components/ui/form-field';
 import { Button } from '@/components/ui/button';
 import { Input, Textarea } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -435,6 +435,8 @@ function MaintenanceFormDialog({
     onError: handleError,
   });
 
+  const status = form.watch('status');
+
   const errors = form.formState.errors;
   const estimateTotal = [
     form.watch('estimatedPartsCost'), form.watch('estimatedLabourCost'),
@@ -444,6 +446,9 @@ function MaintenanceFormDialog({
     form.watch('actualPartsCost'), form.watch('actualLabourCost'),
     form.watch('actualOtherCost'), form.watch('actualTax'),
   ].reduce((total, value) => total + Number(value || 0), 0);
+
+  // Only a record that already carries a lump sum needs the field holding it.
+  const hasLegacyCost = Boolean(record?.cost) && actualTotal === 0;
 
   return (
     <ResourceDialog
@@ -504,37 +509,69 @@ function MaintenanceFormDialog({
         />
       </FormField>
 
+      {/* Nine money fields in one grid asked a scheduled service and a finished
+          one the same questions at once. They are the same fields, split by the
+          question each one answers: what will it cost, and what did it. */}
+      <FormSection
+        title="Estimate"
+        description={
+          !isEdit && estimateHistory?.items[0]
+            ? 'Pre-filled from this truck’s last completed service of this type.'
+            : 'What the work is expected to cost.'
+        }
+      >
+        <FormGrid>
+          <FormField label="Parts (₹)" htmlFor="estimatedPartsCost">
+            <Input id="estimatedPartsCost" type="number" min="0" step="0.01" {...form.register('estimatedPartsCost')} />
+          </FormField>
+          <FormField label="Labour (₹)" htmlFor="estimatedLabourCost">
+            <Input id="estimatedLabourCost" type="number" min="0" step="0.01" {...form.register('estimatedLabourCost')} />
+          </FormField>
+          <FormField label="Other (₹)" htmlFor="estimatedOtherCost">
+            <Input id="estimatedOtherCost" type="number" min="0" step="0.01" {...form.register('estimatedOtherCost')} />
+          </FormField>
+          <FormField label="Tax (₹)" htmlFor="estimatedTax">
+            <Input id="estimatedTax" type="number" min="0" step="0.01" {...form.register('estimatedTax')} />
+          </FormField>
+        </FormGrid>
+      </FormSection>
+
+      {/* The actuals are only knowable once someone has done the work, so they
+          stay out of the way until the record says so. */}
+      {status === 'IN_PROGRESS' || status === 'COMPLETED' ? (
+        <FormSection title="Actual cost" description="What the work came to. Fills the truck’s running costs.">
+          <FormGrid>
+            <FormField label="Parts (₹)" htmlFor="actualPartsCost">
+              <Input id="actualPartsCost" type="number" min="0" step="0.01" {...form.register('actualPartsCost')} />
+            </FormField>
+            <FormField label="Labour (₹)" htmlFor="actualLabourCost">
+              <Input id="actualLabourCost" type="number" min="0" step="0.01" {...form.register('actualLabourCost')} />
+            </FormField>
+            <FormField label="Other (₹)" htmlFor="actualOtherCost">
+              <Input id="actualOtherCost" type="number" min="0" step="0.01" {...form.register('actualOtherCost')} />
+            </FormField>
+            <FormField label="Tax (₹)" htmlFor="actualTax">
+              <Input id="actualTax" type="number" min="0" step="0.01" {...form.register('actualTax')} />
+            </FormField>
+          </FormGrid>
+
+          {/* Older records carry a single lump sum with no breakdown. It is
+              shown so it can be corrected, and hidden where there is none so
+              nobody has to wonder what "legacy" means. */}
+          {hasLegacyCost ? (
+            <FormField
+              label="Total actual cost (₹)"
+              htmlFor="cost"
+              error={errors.cost?.message}
+              hint="This record was entered as one figure, before the breakdown above existed."
+            >
+              <Input id="cost" type="number" min="0" step="0.01" invalid={Boolean(errors.cost)} {...form.register('cost')} />
+            </FormField>
+          ) : null}
+        </FormSection>
+      ) : null}
+
       <FormGrid>
-        <FormField label="Parts estimate (₹)" htmlFor="estimatedPartsCost" hint={!isEdit && estimateHistory?.items[0] ? 'Suggested from this truck’s latest completed service of this type.' : undefined}>
-          <Input id="estimatedPartsCost" type="number" min="0" step="0.01" {...form.register('estimatedPartsCost')} />
-        </FormField>
-        <FormField label="Labour estimate (₹)" htmlFor="estimatedLabourCost">
-          <Input id="estimatedLabourCost" type="number" min="0" step="0.01" {...form.register('estimatedLabourCost')} />
-        </FormField>
-        <FormField label="Other estimate (₹)" htmlFor="estimatedOtherCost">
-          <Input id="estimatedOtherCost" type="number" min="0" step="0.01" {...form.register('estimatedOtherCost')} />
-        </FormField>
-        <FormField label="Estimate tax (₹)" htmlFor="estimatedTax">
-          <Input id="estimatedTax" type="number" min="0" step="0.01" {...form.register('estimatedTax')} />
-        </FormField>
-
-        <FormField label="Actual parts (₹)" htmlFor="actualPartsCost">
-          <Input id="actualPartsCost" type="number" min="0" step="0.01" {...form.register('actualPartsCost')} />
-        </FormField>
-        <FormField label="Actual labour (₹)" htmlFor="actualLabourCost">
-          <Input id="actualLabourCost" type="number" min="0" step="0.01" {...form.register('actualLabourCost')} />
-        </FormField>
-        <FormField label="Actual other (₹)" htmlFor="actualOtherCost">
-          <Input id="actualOtherCost" type="number" min="0" step="0.01" {...form.register('actualOtherCost')} />
-        </FormField>
-        <FormField label="Actual tax (₹)" htmlFor="actualTax">
-          <Input id="actualTax" type="number" min="0" step="0.01" {...form.register('actualTax')} />
-        </FormField>
-
-        <FormField label="Legacy / total actual cost (₹)" htmlFor="cost" error={errors.cost?.message}>
-          <Input id="cost" type="number" min="0" step="0.01" invalid={Boolean(errors.cost)} {...form.register('cost')} />
-        </FormField>
-
         <FormField label="Service date" htmlFor="maintenance-date" required error={errors.date?.message}>
           <Input id="maintenance-date" type="date" invalid={Boolean(errors.date)} {...form.register('date')} />
         </FormField>
